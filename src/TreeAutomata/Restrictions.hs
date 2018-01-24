@@ -1,16 +1,11 @@
 module TreeAutomata.Restrictions where
 -- TODO: rename to Grammar or CFG
 
-import Control.Monad.Error
-import Control.Monad.State
 import Data.List
-import Data.Maybe
-import qualified Data.Set as Set
 import qualified Data.Map as Map
 
-import TreeAutomata
+import TreeAutomata.Internal
 import TreeAutomata.Exp
-import TreeAutomata.Optimizations
 
 -- Add productions for all terminals named in the grammar (assumes terminal names start with '"')
 addTerminals :: Grammar -> Grammar
@@ -97,23 +92,3 @@ precidenceGen h ctorInfo css = {-normalize $-} epsilonClosure $ Grammar ab ({-pA
               [Ctor c [case h i c j of Nothing -> ab; Just k -> name k | j <- [0 .. n-1]] |
                (c, n) <- Map.assocs ctorInfo, c `elem` cs])]
 
-
-{-
-abstractDecl_C99 g = epsilonClosure $ Grammar s (p' ++ add) where
-  Grammar s p' = g `intersectGrammar` Grammar def (pDef ++ p)
-  Grammar def pDef = anyButGrammar g "Def" ["AbstractParameter", "TypeName"]
-  add = [("(declarator,Abs)", Eps "(pointer,Def)"),
-         ("(direct-declarator,Abs)", Ctor "eps" [])]
-  --  (then remove "eps" from "Pointer")
-  abs = "Abs"
-
-  p = [(def, Ctor "AbstractParameter" [def, abs]),
-       (def, Ctor "TypeName" [def, abs]),
-
-       (abs, Ctor "Pointer" [def, abs]),
-       (abs, Ctor "Parens" [def{-(-}, abs, def{-)-}]),
-       (abs, Ctor "ArrayDeclarator" [abs, def{-[-}, def, def, def{-]-}]),
-       (abs, Ctor "ArrayStaticDeclarator1" [abs, def{-[-}, def{-static-}, def, def, def{-]-}]),
-       (abs, Ctor "ArrayStaticDeclarator2" [abs, def{-[-}, def, def{-static-}, def, def{-]-}]),
-       (abs, Ctor "FunctionDeclarator1" [abs, def{-(-}, def, def{-)-}])]
--}

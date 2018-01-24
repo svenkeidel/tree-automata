@@ -1,24 +1,17 @@
 module TreeAutomata.Exp where
--- TODO: rename to Expressions
 
 import Control.Monad
 import Control.Monad.State
 import Data.List
-import Data.IORef
 import System.IO.Unsafe (unsafePerformIO)
 
 import qualified Data.Map as Map
 
-import TreeAutomata
+import TreeAutomata.Internal
 import TreeAutomata.Optimizations
+import Util (diagonalize')
 
-import Debug.Trace
-
-context0 :: CtorInfo
-context0 = Map.fromList [("f",3),("g",2),("h",1),("unit",0)]
-
---type Ctor = String
-type NonTerm = Name -- TODO
+type NonTerm = Name
 
 data Exp
   = Empty
@@ -36,55 +29,12 @@ data Exp
   | Right NonTerm
   deriving (Eq, Ord, Show)
 
--- TODO:
--- data Prods = Prods Arity [NonTerm{-epsilon edges-}] (Map.Map Ctor [NonTerm])
--- data TA = TA NonTerm{-start-} (Map.Map NonTerm Prods)
-{-
-data TA = TA NonTerm{-start-} (Map.Map NonTerm [Prod])
-  deriving (Eq, Ord, Show)
-
-data Prod
-  = Ctor Ctor [NonTerm]
-  | Eps NonTerm
-  deriving (Eq, Ord, Show)
--}
-
--- Convert a list into a diagonal matrix
-diagonalize :: (MonadPlus m) => [a] -> [[m a]]
-diagonalize = diagonalize' return mzero
-
-diagonalize' :: (a -> b) -> b -> [a] -> [[b]]
-diagonalize' return mzero xs = go 0 xs where
-  n  = length xs
---  go :: Arity -> [a] -> [[m a]]
-  go _i [] = []
-  go i (y : ys) = r : go (i + 1) ys where
-    --r :: [m a]
-    r = replicate i mzero ++ [return y] ++ replicate (n-i-1) mzero
-
--- Apply a function to corresponding elements of parallel lists
-zipWithN :: ([a] -> b) -> [[a]] -> [b]
-zipWithN f = map f . transpose
-
-uniqSource :: IORef Integer
-uniqSource = unsafePerformIO (newIORef 0)
-{-# NOINLINE uniqSource #-}
-
-newUnique :: String -> IO String
-newUnique s = do
-  r <- atomicModifyIORef' uniqSource $ \x -> let z = x+1 in (z,z)
-  return ("uniq:"++show r++":"++s)
-{-# NOINLINE newUnique #-}
-
-emptyStart = unsafePerformIO (newUnique "Empty")
-wildStart = unsafePerformIO (newUnique "Wild")
-
 -- TODO: Exp validator (e.g. check that holes are properly nested)
 -- NOTE: start must not be hoisted up, otherwise the unsafeperformIO wont work
 expToTA :: CtorInfo -> Exp -> Grammar
 expToTA ctxt = go where
-  go (Empty) = Grammar emptyStart (Map.fromList [(emptyStart, [])]) where
-  go (Wild) = Grammar wildStart (Map.fromList [(wildStart, [Ctor c (replicate i wildStart) | (c, i) <- Map.toList ctxt])]) where
+  go Empty = empty
+  go Wild = wildcard ctxt
   go (Neg e) = shrink $ dedup $ negateTA ctxt (shrink (dedup (go e)))
   go (And e1 e2) = error "expToTA.And: unimplemented"
   go (Or label e1 e2) =
@@ -205,28 +155,3 @@ orExp s = go 0 where
   go i (x:xs) = Or (s ++ show i) x (go (i + 1) xs)
 
 
-{-
-TODO: simplify
-  nt1 has one edge and that edge is epsilon to nt1: nt1 -> nt2
-  drop empty
-  combine "Wild" and "empty" and "Neg:Wild" and "Neg:Empty"
-  collapse eps -> remove-duplicates -> re-insert eps
--}
-
-{-
-
-Empty
-Wild
-Or Empty Wild
-Cons "h" [] -- should be error
-Cons "unit" []
-Cons "h" [Cons "unit" []]
-Seq "s1" (Cons "h" [Hole "s1"]) (Cons "unit" [])
-Seq "nt1" (Any "nt1") (Cons "h" [Cons "unit" []])
-Neg Empty
-Neg Wild
-orting
-Neg Or
-Neg (Any "nt1")
-
--}

@@ -12,14 +12,14 @@ module TreeAutomata.Optimizations {-(
   dedup
   )-} where
 
-import Control.Monad.Error
+import Control.Monad.Except
 import Control.Monad.State
 import Data.List
 import Data.Maybe
 import qualified Data.Set as Set
 import qualified Data.Map as Map
 
-import TreeAutomata
+import TreeAutomata.Internal
 import Util (iter)
 
 import Debug.Trace
