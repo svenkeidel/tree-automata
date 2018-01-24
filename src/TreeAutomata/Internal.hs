@@ -39,8 +39,16 @@ pp (Grammar start prods) = "start: " ++ start ++ "\n" ++ concatMap f (sort $ Map
 empty :: Grammar
 empty = Grammar emptyStart (Map.fromList [(emptyStart, [])])
 
+-- | Creates a grammar with all possible terms over a given signature
 wildcard :: CtorInfo -> Grammar
 wildcard ctxt = Grammar wildStart (Map.fromList [(wildStart, [Ctor c (replicate i wildStart) | (c, i) <- Map.toList ctxt])]) where
+
+-- | Union of the languages of two grammars. The first string argument
+-- becomes the new start symbol and should be unique.
+union :: String -> Grammar -> Grammar -> Grammar
+union start (Grammar start1 prods1) (Grammar start2 prods2) =
+  Grammar start (Map.insert start [Eps start1, Eps start2] $
+                   Map.unionWith (++) prods1 prods2)
 
 -- | Test the equality of two regular tree grammars
 eqGrammar :: Grammar -> Grammar -> Maybe [(Either String (), [(Name, Name)])]

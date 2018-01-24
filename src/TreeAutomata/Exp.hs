@@ -2,7 +2,7 @@ module TreeAutomata.Exp where
 
 import Control.Monad
 import Control.Monad.State
-import Data.List
+import Data.List hiding (union)
 import System.IO.Unsafe (unsafePerformIO)
 
 import qualified Data.Map as Map
@@ -37,12 +37,8 @@ expToTA ctxt = go where
   go Wild = wildcard ctxt
   go (Neg e) = shrink $ dedup $ negateTA ctxt (shrink (dedup (go e)))
   go (And e1 e2) = error "expToTA.And: unimplemented"
-  go (Or label e1 e2) =
-    Grammar start (Map.insert start [Eps start1, Eps start2] $
-              Map.unionWith (++) prods1 prods2) where
-    start = unsafePerformIO (newUnique ("Or("++show label++")"))
-    Grammar start1 prods1 = go e1
-    Grammar start2 prods2 = go e2
+  go (Or label e1 e2) = union start (go e1) (go e2)
+    where start = unsafePerformIO (newUnique ("Or("++show label++")"))
   go (Cons c es) =
     if length es /= expected
     then error ("expToTA.Cons: "++show c++"("++show expected++"):" ++ show es)
