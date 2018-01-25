@@ -1,7 +1,9 @@
 module Util where
 
-import Data.List
-import Control.Monad
+import           Control.Monad
+
+import           Data.List
+import qualified Data.Set as Set
 
 -- iterate f on x until we reach a fixed point
 iter :: (Eq a) => (a -> a) -> a -> a
@@ -29,3 +31,15 @@ diagonalize' return mzero xs = go 0 xs where
   go i (y : ys) = r : go (i + 1) ys where
     --r :: [m a]
     r = replicate i mzero ++ [return y] ++ replicate (n-i-1) mzero
+
+splitOffFirstGroup :: (a -> a -> Bool) -> [a] -> ([a],[a])
+splitOffFirstGroup equal xs@(x:_) = partition (equal x) xs
+splitOffFirstGroup _     []       = ([],[])
+
+equivalenceClasses :: (a -> a -> Bool) -> [a] -> [[a]]
+equivalenceClasses _     [] = []
+equivalenceClasses equal xs = let (fg,rst) = splitOffFirstGroup equal xs
+                              in fg : equivalenceClasses equal rst
+
+equivalenceClasses' :: (Ord a) => (a -> a -> Bool) -> Set.Set a -> [Set.Set a]
+equivalenceClasses' f = map Set.fromList . equivalenceClasses f . Set.toList

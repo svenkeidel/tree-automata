@@ -1,15 +1,17 @@
 module TreeAutomata.Exp where
 
-import Control.Monad
-import Control.Monad.State
-import Data.List hiding (union)
-import System.IO.Unsafe (unsafePerformIO)
+import           Control.Monad
+import           Control.Monad.State
 
+import           Data.IORef
+import           Data.List hiding (union)
 import qualified Data.Map as Map
 
-import TreeAutomata.Internal
-import TreeAutomata.Optimizations
-import Util (diagonalize')
+import           System.IO.Unsafe (unsafePerformIO)
+
+import           TreeAutomata hiding (sequence)
+import qualified TreeAutomata
+import           Util (diagonalize')
 
 type NonTerm = Name
 
@@ -33,8 +35,8 @@ data Exp
 -- NOTE: start must not be hoisted up, otherwise the unsafeperformIO wont work
 expToTA :: CtorInfo -> Exp -> Grammar
 expToTA ctxt = go where
-  go Empty = empty
-  go Wild = wildcard ctxt
+  go Empty = empty emptyStart
+  go Wild = wildcard ctxt wildStart 
   go (Neg e) = shrink $ dedup $ negateTA ctxt (shrink (dedup (go e)))
   go (And e1 e2) = error "expToTA.And: unimplemented"
   go (Or label e1 e2) = union start (go e1) (go e2)
@@ -51,12 +53,8 @@ expToTA ctxt = go where
     tas = map go es
   go (Hole nt) = Grammar start (Map.fromList [(start, [Eps nt])]) where
     start = unsafePerformIO (newUnique $ "Hole("++show nt++")")
-  go (Seq label e1 e2) = Grammar start (Map.insert start [Eps start1] $
-                                Map.insertWith (++) label [Eps start2] $
-                                Map.unionWith (++) prods1 prods2) where
+  go (Seq label e1 e2) = TreeAutomata.sequence start label (go e1) (go e2) where
     start = unsafePerformIO (newUnique $ "Seq("++show label++")")
-    Grammar start1 prods1 = go e1
-    Grammar start2 prods2 = go e2
   go (Star label e1) = Grammar start (Map.insert start [Eps label] $
                                  Map.insert label [Eps start1] $
                                   prods1) where
@@ -151,3 +149,106 @@ orExp s = go 0 where
   go i (x:xs) = Or (s ++ show i) x (go (i + 1) xs)
 
 
+leftAssoc' :: CtorInfo -> [Ctor] -> Grammar
+leftAssoc' ctorInfo cs = expToTA ctorInfo (leftAssocExp ctorInfo cs)
+
+leftAssocExp ctorInfo cs = exp where
+  exp = Neg (Seq "s1" (Any "s1") (orExp "leftAssoc" violations))
+  violations = [ Cons c1 ((replicate (i1-1) Wild) ++ [Cons c2 (replicate i2 Wild)]) |
+                 c1 <- cs,
+                 c2 <- cs,
+                 let i1 = Map.findWithDefault (error "leftAssoc.c1") c1 ctorInfo,
+                 let i2 = Map.findWithDefault (error "leftAssoc.c2") c2 ctorInfo]
+
+rightAssoc' :: CtorInfo -> [Ctor] -> Grammar
+rightAssoc' ctorInfo cs = expToTA ctorInfo exp where
+  exp = Neg (Seq "s1" (Any "s1") (orExp "rightAssoc" violations))
+  violations = [ Cons c1 (Cons c2 (replicate i2 Wild) : replicate (i1-1) Wild) |
+                 c1 <- cs,
+                 c2 <- cs,
+                 let i1 = Map.findWithDefault (error "rightAssoc.c1") c1 ctorInfo,
+                 let i2 = Map.findWithDefault (error "rightAssoc.c2") c2 ctorInfo]
+
+leftAssoc :: CtorInfo -> [Ctor] -> Grammar
+leftAssoc ctorInfo cs = Grammar ab (pAB +++ p +++ pABO) where
+  Grammar ab pAB = anyButGrammar ctorInfo "Any" cs
+  p = Map.fromList [("Any", [Ctor c ((replicate (n-1) "Any") ++ [abo]) | (c, n) <- Map.assocs ctorInfo, c `elem` cs])]
+  Grammar abo pABO = anyButOneGrammar ctorInfo "NoCtor" ab cs
+
+rightAssoc :: CtorInfo -> [Ctor] -> Grammar
+rightAssoc ctorInfo cs = Grammar ab (pAB +++ p +++ pABO) where
+  Grammar ab pAB = anyButGrammar ctorInfo "Any" cs
+  p = Map.fromList [("Any", [Ctor c ([abo] ++ (replicate (n-1) "Any")) | (c, n) <- Map.assocs ctorInfo, c `elem` cs])]
+  Grammar abo pABO = anyButOneGrammar ctorInfo "NoCtor" ab cs
+
+assocs :: CtorInfo -> [(Bool, [Ctor])] -> [Grammar]
+assocs _ [] = []
+assocs ctorInfo ((isLeft, ctors) : rest) = f ctorInfo ctors : assocs ctorInfo rest where
+  f = if isLeft then leftAssoc else rightAssoc
+
+assocs' :: CtorInfo -> [(Bool, [Ctor])] -> [Grammar]
+assocs' _ [] = []
+assocs' ctorInfo ((isLeft, ctors) : rest) = f ctorInfo ctors : assocs ctorInfo rest where
+  f = if isLeft then leftAssoc' else rightAssoc'
+
+strictPrecidence ctorInfo css = {-normalize $-} epsilonClosure $ Grammar ab ({-pAB `unionProds`-} pAB' `unionProds` p) where
+  name i = "Prec" ++ show i
+  --Grammar ab pAB = anyButGrammar ctorInfo "Any" (concat css)
+  ab = name 1
+  Grammar _ pAB' = anyButOneGrammar ctorInfo (name ((length css) + 1)) ab (concat css)
+  p = (Map.fromList $ [(ab, [Eps (name 1)])]) `unionProds`
+      (Map.fromList $ concat $ zipWith f [1..] css)
+  f i cs =
+    [(name i, [Eps (name (i+1))] ++
+              [Ctor c (take n (repeat (name (i+1)))) |
+               (c, n) <- Map.assocs ctorInfo, c `elem` cs])]
+
+precidence = precidenceGen f where
+  f j c i = Just j
+
+-- h returning Nothing means break out of the precidence hierarchy
+-- h returning Just means go to that precidence level
+precidenceGen :: (Int -> Ctor -> Arity -> Maybe Int) -> CtorInfo -> [[Name]] -> Grammar
+precidenceGen h ctorInfo css = {-normalize $-} epsilonClosure $ Grammar ab ({-pAB `unionProds`-} pAB' `unionProds` p) where
+  name i = "Prec" ++ show i
+  --Grammar ab pAB = anyButGrammar ctorInfo "Any" (concat css)
+  ab = name 1
+  Grammar _ pAB' = anyButOneGrammar ctorInfo (name ((length css) + 1)) ab (concat css)
+  p = (Map.fromList $ [(ab, [Eps (name 1)])]) `unionProds`
+      (Map.fromList $ concat $ zipWith f [1..] css)
+  f i cs =
+    [(name i, [Eps (name (i+1))] ++
+              [Ctor c [case h i c j of Nothing -> ab; Just k -> name k | j <- [0 .. n-1]] |
+               (c, n) <- Map.assocs ctorInfo, c `elem` cs])]
+
+anyButOneGrammar ctorInfo name alt ctors =
+  Grammar name (Map.fromList [(name, [Ctor c (replicate n alt) | (c, n) <- Map.assocs ctorInfo, c `notElem` ctors])])
+
+anyGrammar ctorInfo name = anyButGrammar ctorInfo name []
+
+anyButGrammar ctorInfo name ctors = anyButOneGrammar ctorInfo name name ctors
+
+uniqSource :: IORef Integer
+uniqSource = unsafePerformIO (newIORef 0)
+{-# NOINLINE uniqSource #-}
+
+newUnique :: String -> IO String
+newUnique s = do
+  r <- atomicModifyIORef' uniqSource $ \x -> let z = x+1 in (z,z)
+  return ("uniq:"++show r++":"++s)
+{-# NOINLINE newUnique #-}
+
+emptyStart :: String
+emptyStart = unsafePerformIO (newUnique "Empty")
+{-# NOINLINE emptyStart #-}
+
+wildStart :: String
+wildStart = unsafePerformIO (newUnique "Wild")
+{-# NOINLINE wildStart #-}
+
+(+++) :: Map.Map Name [Rhs] -> Map.Map Name [Rhs] -> Map.Map Name [Rhs]
+p1 +++ p2 = Map.unionWith f p1 p2 where
+  f x y = nub $ sort $ x ++ y
+
+unionProds :: Map.Map Name [Rhs] -> Map.Map Name [Rhs] -> Map.Map Name [Rhs]
+unionProds = (+++)

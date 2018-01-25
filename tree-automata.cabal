@@ -19,9 +19,6 @@ library
   ghc-options:         -O2
   exposed-modules:     TreeAutomata
                        TreeAutomata.Exp
-                       TreeAutomata.Optimizations
-                       TreeAutomata.Restrictions
-                       TreeAutomata.Internal
   other-modules:       Util
   build-depends:       base >= 4.7 && < 5
                      , Cabal
