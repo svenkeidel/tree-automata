@@ -27,4 +27,6 @@ library
                      , parsec
                      , random
                      , syb
+                     , text
+                     , text-show
                      , deepseq

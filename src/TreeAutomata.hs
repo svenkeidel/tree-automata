@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections, FlexibleContexts #-}
+{-# LANGUAGE TupleSections, FlexibleContexts, OverloadedStrings #-}
 module TreeAutomata
   ( Grammar(..)
   , Rhs (..)
@@ -27,14 +27,16 @@ import           Data.List hiding (union)
 import qualified Data.Map as Map
 import           Data.Maybe
 import qualified Data.Set as Set
+import           Data.Text (Text)
+import qualified Data.Text as Text
 
 import           Debug.Trace
 
 import           Util
 
 -- Data types for TreeAutomata
-type Ctor = String -- Tree-constructor labels
-type Name = String -- Non-terminal names
+type Ctor = Text -- Tree-constructor labels
+type Name = Text -- Non-terminal names
 data Rhs = Ctor Ctor [Name] | Eps Name deriving (Show, Eq, Ord)
 type Prod = (Name, Rhs)
 -- TODO: rename Grammar to TreeAutomata
@@ -44,11 +46,13 @@ type CtorInfo = Map.Map Ctor Arity
 type Arity = Int
 
 instance Show Grammar where
-  show (Grammar start prods) = "start: " ++ start ++ "\n" ++ concatMap f (sort $ Map.toList prods)
+  show (Grammar start prods) = "start: " ++ Text.unpack start ++ "\n" ++ concatMap f (sort $ Map.toList prods)
     where
+      f :: (Text, [Rhs]) -> String
       f (lhs, rhs) = unlines (map (g lhs) $ sort rhs)
-      g lhs (Ctor c ns) = lhs ++ ":" ++ c ++ ": " ++ unwords ns
-      g lhs (Eps n) = lhs ++ ": " ++ n
+      g :: Text -> Rhs -> String
+      g lhs (Ctor c ns) = Text.unpack lhs ++ ":" ++ Text.unpack c ++ ": " ++ Text.unpack (Text.unwords ns)
+      g lhs (Eps n) = Text.unpack lhs ++ ": " ++ Text.unpack n
 
 instance Eq Grammar where
   g1 == g2 = isJust $ eqGrammar g1 g2
@@ -70,7 +74,7 @@ wildcard ctxt start = Grammar start (Map.fromList [(start, [Ctor c (replicate i 
 
 -- | Union of the languages of two grammars. The first string argument
 -- becomes the new start symbol and should be unique.
-union :: String -> Grammar -> Grammar -> Grammar
+union :: Text -> Grammar -> Grammar -> Grammar
 union start (Grammar start1 prods1) (Grammar start2 prods2) =
   Grammar start (Map.insert start [Eps start1, Eps start2] $
                    Map.unionWith (++) prods1 prods2)
@@ -107,7 +111,7 @@ eqGrammar' (Grammar s1 ps1) (Grammar s2 ps2) =
                     if length p1 /= length p2
                     then let p1ctors = [c | (_, Ctor c _) <- p1]
                              p2ctors = [c | (_, Ctor c _) <- p2]
-                         in throwError $ "Different number of productions: " ++ intercalate " !!!!! " [s1, s2, show $ length p1, show $ length p2, show $ zip p1ctors p2ctors, show p1ctors, show p2ctors, unlines $ map show p1, unlines $ map show p2]
+                         in throwError $ "Different number of productions: " ++ intercalate " !!!!! " [show s1, show s2, show $ length p1, show $ length p2, show $ zip p1ctors p2ctors, show p1ctors, show p2ctors, unlines $ map show p1, unlines $ map show p2]
                     else do let p1' = [p | p@(_, Ctor _ _) <- p1] ++ [p | p@(_, Eps _) <- p1]
                             p2' <- lift $ lift $ map ([p | p@(_, Ctor _ _) <- p2]++) $ permutations [p | p@(_, Eps _) <- p2]
                             zipWithM_ g p1' p2'
@@ -120,7 +124,8 @@ eqGrammar' (Grammar s1 ps1) (Grammar s2 ps2) =
 
 intersection :: Grammar -> Grammar -> Grammar
 intersection (Grammar s1 p1) (Grammar s2 p2) = Grammar (intersectName s1 s2) (Map.fromList prods) where
-  intersectName n1 n2 = "(" ++ n1 ++ "," ++ n2 ++ ")"
+  intersectName :: Text -> Text -> Text
+  intersectName n1 n2 = Text.concat ["(", n1, ",", n2, ")"]
   prods = [(intersectName n1 n2,
             [Ctor c1 (zipWith intersectName x1 x2)
              | Ctor c1 x1 <- r1,
@@ -161,6 +166,7 @@ epsilonClosure (Grammar s p) = Grammar s (Map.mapWithKey (\k _ -> close k) p) wh
 introduceEpsilons :: Grammar -> Grammar
 introduceEpsilons g = Grammar start $ Map.mapWithKey go prodMap where
   Grammar start prodMap  = shrink $ epsilonClosure g
+  go :: Text -> [Rhs] -> [Rhs]
   go key prods =
     let isSubsetOf ps1 ps2 = Set.fromList ps1 `Set.isSubsetOf` Set.fromList ps2
         candidates = filter ((`isSubsetOf` prods) . snd) $ filter ((/= key) . fst) $ Map.toList prodMap
@@ -170,13 +176,13 @@ introduceEpsilons g = Grammar start $ Map.mapWithKey go prodMap where
         countEps (Ctor _ []) = 1
         countEps _ = 0
         best' = head (ties' ++ [(key, [])]{-have at least one element for head-})
-        msg = "!!! Warning: "++show (length ties)++"("++show (map (sum . map countEps . snd) ties')++") possibilities for '"++key++"'\n" ++
+        msg = "!!! Warning: "++show (length ties)++"("++show (map (sum . map countEps . snd) ties')++") possibilities for '"++show key++"'\n" ++
               "!!! Need: " ++ show (Grammar key (Map.singleton key prods)) ++
               concat ["!!! Have: " ++ show (Grammar k (Map.singleton k p)) | (k, p) <- ties]
         warn = if length ties <= 1 then id else trace msg
     in if length (snd best') <= 1
        then prods
-       else warn $ Eps (fst best') : go ("<"++key++">") (Set.toList $ Set.fromList prods `Set.difference` Set.fromList (snd best'))
+       else warn $ Eps (fst best') : go (Text.concat ["<", key, ">"]) (Set.toList $ Set.fromList prods `Set.difference` Set.fromList (snd best'))
 
 substNames :: [[Name]] -> Grammar -> Grammar
 substNames e g = foldr subst g (map sort e) where
@@ -381,26 +387,11 @@ normalize = dropUnreachable . dropEmpty . dropUnreachable
 intersectGrammar' :: Grammar -> Grammar -> Grammar
 intersectGrammar' g1 g2 = normalize $ intersection g1 g2
 
-shortNamesNames :: [String]
-shortNamesNames = f ++ f' where
-  f = map (:[]) $ ['A' .. 'Z'] ++ ['a' .. 'z']
-  f' = (++) <$> shortNamesNames <*> f
-
-shortNames :: Grammar -> Grammar
-shortNames (Grammar s p) = Grammar s' p' where
-  subst :: Map.Map String String
-  subst = Map.fromList (zip (Map.keys p) shortNamesNames)
-  renameName n = Map.findWithDefault (error "shortNames") n subst
-  renameRhs (Ctor c ns) = Ctor c (map renameName ns)
-  renameRhs (Eps n) = Eps (renameName n)
-  s' = renameName s
-  p' = Map.mapKeys renameName (Map.map (map renameRhs) p)
-
--- Add productions for all terminals named in the grammar (assumes terminal names start with '"')
+-- | Add productions for all terminals named in the grammar (assumes terminal names start with '"')
 addTerminals :: Grammar -> Grammar
 addTerminals (Grammar start prods) = Grammar start (Map.fromList $ Map.toList prods ++ terminals) where
-  terminals = nub $ sort $
-    [(t, [Ctor t []]) | (_,  rhs) <- Map.toList prods, t@('"':_) <- concatMap rhsNames rhs]
+  terminals = nub $ sort
+    [ (t, [Ctor t []]) | (_,  rhs) <- Map.toList prods, t <- concatMap rhsNames rhs, Text.head t == '"']
 
 {- Old method of complementing TA (never fully implemented)
 ----------------------------- NEW STUFF
