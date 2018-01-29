@@ -61,8 +61,7 @@ expToTA ctxt = go where
   go (Seq label e1 e2) = TreeAutomata.sequence start label (go e1) (go e2) where
     start = newU (Text.concat ["Seq(", showt label, ")"])
   go (Star label e1) = Grammar start (Map.insert start [Eps label] $
-                                 Map.insert label [Eps start1] $
-                                  prods1) where
+                                 Map.insert label [Eps start1] prods1) where
     start = newU (Text.concat ["Star(", showt label, ")"])
     Grammar start1 prods1 = go e1
   go (Any nt) = go (AnyBut nt [])
@@ -72,7 +71,7 @@ expToTA ctxt = go where
     newProds =
       Map.insertWith (++) nt [] $
       Map.insertWith (++) start [Eps nt] $
-      Map.fromList $
+      Map.fromList
       [(start,
          [Ctor c p
           | (c, i) <- Map.toList ctxt
@@ -158,7 +157,7 @@ leftAssoc' ctorInfo cs = expToTA ctorInfo (leftAssocExp ctorInfo cs)
 
 leftAssocExp ctorInfo cs = exp where
   exp = Neg (Seq "s1" (Any "s1") (orExp "leftAssoc" violations))
-  violations = [ Cons c1 ((replicate (i1-1) Wild) ++ [Cons c2 (replicate i2 Wild)]) |
+  violations = [ Cons c1 (replicate (i1-1) Wild ++ [Cons c2 (replicate i2 Wild)]) |
                  c1 <- cs,
                  c2 <- cs,
                  let i1 = Map.findWithDefault (error "leftAssoc.c1") c1 ctorInfo,
@@ -176,13 +175,13 @@ rightAssoc' ctorInfo cs = expToTA ctorInfo exp where
 leftAssoc :: CtorInfo -> [Ctor] -> Grammar
 leftAssoc ctorInfo cs = Grammar ab (pAB +++ p +++ pABO) where
   Grammar ab pAB = anyButGrammar ctorInfo "Any" cs
-  p = Map.fromList [("Any", [Ctor c ((replicate (n-1) "Any") ++ [abo]) | (c, n) <- Map.assocs ctorInfo, c `elem` cs])]
+  p = Map.fromList [("Any", [Ctor c (replicate (n-1) "Any" ++ [abo]) | (c, n) <- Map.assocs ctorInfo, c `elem` cs])]
   Grammar abo pABO = anyButOneGrammar ctorInfo "NoCtor" ab cs
 
 rightAssoc :: CtorInfo -> [Ctor] -> Grammar
 rightAssoc ctorInfo cs = Grammar ab (pAB +++ p +++ pABO) where
   Grammar ab pAB = anyButGrammar ctorInfo "Any" cs
-  p = Map.fromList [("Any", [Ctor c ([abo] ++ (replicate (n-1) "Any")) | (c, n) <- Map.assocs ctorInfo, c `elem` cs])]
+  p = Map.fromList [("Any", [Ctor c (abo : replicate (n-1) "Any") | (c, n) <- Map.assocs ctorInfo, c `elem` cs])]
   Grammar abo pABO = anyButOneGrammar ctorInfo "NoCtor" ab cs
 
 assocs :: CtorInfo -> [(Bool, [Ctor])] -> [Grammar]
@@ -200,12 +199,12 @@ strictPrecidence ctorInfo css = {-normalize $-} epsilonClosure $ Grammar ab ({-p
   name i = Text.append "Prec" (showt i)
   --Grammar ab pAB = anyButGrammar ctorInfo "Any" (concat css)
   ab = name 1
-  Grammar _ pAB' = anyButOneGrammar ctorInfo (name ((length css) + 1)) ab (concat css)
+  Grammar _ pAB' = anyButOneGrammar ctorInfo (name (length css + 1)) ab (concat css)
   p = (Map.fromList $ [(ab, [Eps (name 1)])]) `unionProds`
       (Map.fromList $ concat $ zipWith f [1..] css)
   f i cs =
-    [(name i, [Eps (name (i+1))] ++
-              [Ctor c (take n (repeat (name (i+1)))) |
+    [(name i, Eps (name (i+1)) :
+              [Ctor c (replicate n (name (i+1))) |
                (c, n) <- Map.assocs ctorInfo, c `elem` cs])]
 
 precidence = precidenceGen f where
@@ -219,11 +218,11 @@ precidenceGen h ctorInfo css = {-normalize $-} epsilonClosure $ Grammar ab ({-pA
   name i = Text.append "Prec" (showt i)
   --Grammar ab pAB = anyButGrammar ctorInfo "Any" (concat css)
   ab = name 1
-  Grammar _ pAB' = anyButOneGrammar ctorInfo (name ((length css) + 1)) ab (concat css)
+  Grammar _ pAB' = anyButOneGrammar ctorInfo (name (length css + 1)) ab (concat css)
   p = (Map.fromList $ [(ab, [Eps (name 1)])]) `unionProds`
       (Map.fromList $ concat $ zipWith f [1..] css)
   f i cs =
-    [(name i, [Eps (name (i+1))] ++
+    [(name i, Eps (name (i+1)) :
               [Ctor c [case h i c j of Nothing -> ab; Just k -> name k | j <- [0 .. n-1]] |
                (c, n) <- Map.assocs ctorInfo, c `elem` cs])]
 

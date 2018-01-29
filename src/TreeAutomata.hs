@@ -70,7 +70,7 @@ empty start = Grammar start (Map.fromList [(start, [])])
 
 -- | Creates a grammar with all possible terms over a given signature
 wildcard :: CtorInfo -> Name -> Grammar
-wildcard ctxt start = Grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, i) <- Map.toList ctxt])]) where
+wildcard ctxt start = Grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, i) <- Map.toList ctxt])])
 
 -- | Union of the languages of two grammars. The first string argument
 -- becomes the new start symbol and should be unique.
@@ -160,7 +160,7 @@ epsilonClosure (Grammar s p) = Grammar s (Map.mapWithKey (\k _ -> close k) p) wh
     r <- get
     unless (Set.member n r) $ do
       put (Set.insert n r)
-      sequence_ [epsReach k | Eps k <- Map.findWithDefault (error ("epsilonClosure.findWithDefault"++show(n))) n p]
+      sequence_ [epsReach k | Eps k <- Map.findWithDefault (error ("epsilonClosure.findWithDefault"++show n)) n p]
 
 
 introduceEpsilons :: Grammar -> Grammar
@@ -185,7 +185,7 @@ introduceEpsilons g = Grammar start $ Map.mapWithKey go prodMap where
        else warn $ Eps (fst best') : go (Text.concat ["<", key, ">"]) (Set.toList $ Set.fromList prods `Set.difference` Set.fromList (snd best'))
 
 substNames :: [[Name]] -> Grammar -> Grammar
-substNames e g = foldr subst g (map sort e) where
+substNames e g = foldr (subst . sort) g e where
   subst :: [Name] -> Grammar -> Grammar
   subst (n : ns) g = foldr (flip subst1 n) g ns
 
@@ -219,7 +219,7 @@ eqvClasses' nameInv p = iter f init where
   f :: Map.Map Int Int -> Map.Map Int Int -- name |-> repesentitive name
   f eqvs = {-trace ("eqvClasses':\n"++unlines [Map.findWithDefault (error "eqvClass'") i nameInv ++ " -> " ++ Map.findWithDefault (error "eqvClasses'") j nameInv | (i, j) <- Map.toList eqvs])-} result where
     inv :: Map.Map [(Int, [Int])] [Int{-old name-}] -- [(ctor, [nt])] |-> member names
-    inv = foldr (uncurry (Map.insertWith (++))) Map.empty (map renameProds pList)
+    inv = foldr (uncurry (Map.insertWith (++)) . renameProds) Map.empty pList
     renameProds :: (Int, [(Int, [Int])]) -> ([(Int, [Int])], [Int])
     renameProds (n, rhs) = (map renameProd rhs, [n])
     renameProd (c, args) = (c, map renameName args)
@@ -232,14 +232,14 @@ eqvClasses' nameInv p = iter f init where
 -- TODO: optimize shrink for two states and lots of prods since many TA are like that
 -- | Optimizes a grammar by first calculating equivalence classes and then normalizing the grammar.
 shrink :: Grammar -> Grammar
-shrink g = normalize (eqvClasses ({-elimSingleEps2-} g))
+shrink g = normalize (eqvClasses {-elimSingleEps2-} g)
 
 eqvClasses :: Grammar -> Grammar
 eqvClasses (Grammar s p) = Grammar sFinal pFinal where
   Grammar sEps pEps = {-dedup $-} epsilonClosure (Grammar s p)
 
   names :: [Name]
-  names = nub $ sort $ s : (Map.keys p)
+  names = nub $ sort $ s : Map.keys p
   nameMap = Map.fromList (zip names [1..])
   nameInv = Map.fromList (zip [1..] names)
 
@@ -260,7 +260,7 @@ eqvClasses (Grammar s p) = Grammar sFinal pFinal where
   renaming = eqvClasses' nameInv p'
 
   renamingInv :: Map.Map Int{-new name-} [Int]{-old name-}
-  renamingInv = foldr (uncurry (Map.insertWith (++))) Map.empty (map (\(n,n') -> (n', [n])) (Map.toList renaming))
+  renamingInv = foldr (uncurry (Map.insertWith (++)) . (\(n,n') -> (n', [n]))) Map.empty (Map.toList renaming)
 
   renameName :: Name -> Name
   renameName n = {-trace ("renameName "++n++" -> "++n') $-} n' where
@@ -333,7 +333,7 @@ elimSingleCtor (Grammar s p) = normalize (Grammar s (Map.map (map f) p)) where
 
 -- | Eliminates non-terminals that are used only once when that one time is an epsilon transition
 elimSingleUse (Grammar s p) = normalize (Grammar s (Map.map replaceSingleUse p)) where
-  replaceSingleUse prods = concat (map replaceSingleUseProd prods)
+  replaceSingleUse prods = concatMap replaceSingleUseProd prods
   replaceSingleUseProd (Eps n)
     | n `elem` singleUse = fromJust (Map.lookup n p)
   replaceSingleUseProd x = [x]
@@ -358,9 +358,9 @@ dropEmpty (Grammar s p) = Grammar s (Map.map filterProds (Map.filterWithKey (\k 
   invMap = Map.fromList $
            map (\xs -> (snd (head xs), nub $ sort $ map fst xs)) $
            groupBy (\a b -> snd a == snd b) $
-           sortBy (\a b -> snd a `compare` snd b) $
+           sortBy (\a b -> snd a `compare` snd b)
            [(l, x) | (l, r) <- Map.toList p, x <- concatMap rhsNames r]
-  nulls = nub $ sort $ [l | (l, r) <- Map.toList p, Ctor _ [] <- r]
+  nulls = nub $ sort [l | (l, r) <- Map.toList p, Ctor _ [] <- r]
   f :: Name -> State (Set.Set Name) ()
   f n = do r <- get
            unless (Set.member n r) $ do
@@ -376,7 +376,7 @@ dropUnreachable (Grammar s p) = Grammar s (Map.filterWithKey (\k _ -> Set.member
   f n = do r <- get
            unless (Set.member n r) $ do
              put (Set.insert n r)
-             sequence_ [mapM_ f (rhsNames x) | x <- case Map.lookup n p of Just y -> y; Nothing -> error ("error.dropUnreachable:"++show (n,s,p))]
+             sequence_ [mapM_ f (rhsNames x) | x <- fromMaybe (error ("error.dropUnreachable:"++show (n,s,p))) (Map.lookup n p)]
 
 -- | Remove useless productions.
 -- We drop unreachable first because that plays better with laziness.
