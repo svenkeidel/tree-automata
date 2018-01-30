@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections, FlexibleContexts #-}
+{-# LANGUAGE TupleSections, FlexibleContexts, OverloadedStrings #-}
 module TreeAutomata
   ( Grammar(..)
   , Rhs (..)
@@ -27,14 +27,16 @@ import           Data.List hiding (union)
 import qualified Data.Map as Map
 import           Data.Maybe
 import qualified Data.Set as Set
+import           Data.Text (Text)
+import qualified Data.Text as Text
 
 import           Debug.Trace
 
 import           Util
 
 -- Data types for TreeAutomata
-type Ctor = String -- Tree-constructor labels
-type Name = String -- Non-terminal names
+type Ctor = Text -- Tree-constructor labels
+type Name = Text -- Non-terminal names
 data Rhs = Ctor Ctor [Name] | Eps Name deriving (Show, Eq, Ord)
 type Prod = (Name, Rhs)
 -- TODO: rename Grammar to TreeAutomata
@@ -44,11 +46,13 @@ type CtorInfo = Map.Map Ctor Arity
 type Arity = Int
 
 instance Show Grammar where
-  show (Grammar start prods) = "start: " ++ start ++ "\n" ++ concatMap f (sort $ Map.toList prods)
+  show (Grammar start prods) = "start: " ++ Text.unpack start ++ "\n" ++ concatMap f (sort $ Map.toList prods)
     where
+      f :: (Text, [Rhs]) -> String
       f (lhs, rhs) = unlines (map (g lhs) $ sort rhs)
-      g lhs (Ctor c ns) = lhs ++ ":" ++ c ++ ": " ++ unwords ns
-      g lhs (Eps n) = lhs ++ ": " ++ n
+      g :: Text -> Rhs -> String
+      g lhs (Ctor c ns) = Text.unpack lhs ++ ":" ++ Text.unpack c ++ ": " ++ Text.unpack (Text.unwords ns)
+      g lhs (Eps n) = Text.unpack lhs ++ ": " ++ Text.unpack n
 
 instance Eq Grammar where
   g1 == g2 = isJust $ eqGrammar g1 g2
@@ -66,11 +70,11 @@ empty start = Grammar start (Map.fromList [(start, [])])
 
 -- | Creates a grammar with all possible terms over a given signature
 wildcard :: CtorInfo -> Name -> Grammar
-wildcard ctxt start = Grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, i) <- Map.toList ctxt])]) where
+wildcard ctxt start = Grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, i) <- Map.toList ctxt])])
 
 -- | Union of the languages of two grammars. The first string argument
 -- becomes the new start symbol and should be unique.
-union :: String -> Grammar -> Grammar -> Grammar
+union :: Text -> Grammar -> Grammar -> Grammar
 union start (Grammar start1 prods1) (Grammar start2 prods2) =
   Grammar start (Map.insert start [Eps start1, Eps start2] $
                    Map.unionWith (++) prods1 prods2)
@@ -107,7 +111,7 @@ eqGrammar' (Grammar s1 ps1) (Grammar s2 ps2) =
                     if length p1 /= length p2
                     then let p1ctors = [c | (_, Ctor c _) <- p1]
                              p2ctors = [c | (_, Ctor c _) <- p2]
-                         in throwError $ "Different number of productions: " ++ intercalate " !!!!! " [s1, s2, show $ length p1, show $ length p2, show $ zip p1ctors p2ctors, show p1ctors, show p2ctors, unlines $ map show p1, unlines $ map show p2]
+                         in throwError $ "Different number of productions: " ++ intercalate " !!!!! " [show s1, show s2, show $ length p1, show $ length p2, show $ zip p1ctors p2ctors, show p1ctors, show p2ctors, unlines $ map show p1, unlines $ map show p2]
                     else do let p1' = [p | p@(_, Ctor _ _) <- p1] ++ [p | p@(_, Eps _) <- p1]
                             p2' <- lift $ lift $ map ([p | p@(_, Ctor _ _) <- p2]++) $ permutations [p | p@(_, Eps _) <- p2]
                             zipWithM_ g p1' p2'
@@ -120,7 +124,8 @@ eqGrammar' (Grammar s1 ps1) (Grammar s2 ps2) =
 
 intersection :: Grammar -> Grammar -> Grammar
 intersection (Grammar s1 p1) (Grammar s2 p2) = Grammar (intersectName s1 s2) (Map.fromList prods) where
-  intersectName n1 n2 = "(" ++ n1 ++ "," ++ n2 ++ ")"
+  intersectName :: Text -> Text -> Text
+  intersectName n1 n2 = Text.concat ["(", n1, ",", n2, ")"]
   prods = [(intersectName n1 n2,
             [Ctor c1 (zipWith intersectName x1 x2)
              | Ctor c1 x1 <- r1,
@@ -155,12 +160,13 @@ epsilonClosure (Grammar s p) = Grammar s (Map.mapWithKey (\k _ -> close k) p) wh
     r <- get
     unless (Set.member n r) $ do
       put (Set.insert n r)
-      sequence_ [epsReach k | Eps k <- Map.findWithDefault (error ("epsilonClosure.findWithDefault"++show(n))) n p]
+      sequence_ [epsReach k | Eps k <- Map.findWithDefault (error ("epsilonClosure.findWithDefault"++show n)) n p]
 
 
 introduceEpsilons :: Grammar -> Grammar
 introduceEpsilons g = Grammar start $ Map.mapWithKey go prodMap where
   Grammar start prodMap  = shrink $ epsilonClosure g
+  go :: Text -> [Rhs] -> [Rhs]
   go key prods =
     let isSubsetOf ps1 ps2 = Set.fromList ps1 `Set.isSubsetOf` Set.fromList ps2
         candidates = filter ((`isSubsetOf` prods) . snd) $ filter ((/= key) . fst) $ Map.toList prodMap
@@ -170,16 +176,16 @@ introduceEpsilons g = Grammar start $ Map.mapWithKey go prodMap where
         countEps (Ctor _ []) = 1
         countEps _ = 0
         best' = head (ties' ++ [(key, [])]{-have at least one element for head-})
-        msg = "!!! Warning: "++show (length ties)++"("++show (map (sum . map countEps . snd) ties')++") possibilities for '"++key++"'\n" ++
+        msg = "!!! Warning: "++show (length ties)++"("++show (map (sum . map countEps . snd) ties')++") possibilities for '"++show key++"'\n" ++
               "!!! Need: " ++ show (Grammar key (Map.singleton key prods)) ++
               concat ["!!! Have: " ++ show (Grammar k (Map.singleton k p)) | (k, p) <- ties]
         warn = if length ties <= 1 then id else trace msg
     in if length (snd best') <= 1
        then prods
-       else warn $ Eps (fst best') : go ("<"++key++">") (Set.toList $ Set.fromList prods `Set.difference` Set.fromList (snd best'))
+       else warn $ Eps (fst best') : go (Text.concat ["<", key, ">"]) (Set.toList $ Set.fromList prods `Set.difference` Set.fromList (snd best'))
 
 substNames :: [[Name]] -> Grammar -> Grammar
-substNames e g = foldr subst g (map sort e) where
+substNames e g = foldr (subst . sort) g e where
   subst :: [Name] -> Grammar -> Grammar
   subst (n : ns) g = foldr (flip subst1 n) g ns
 
@@ -213,7 +219,7 @@ eqvClasses' nameInv p = iter f init where
   f :: Map.Map Int Int -> Map.Map Int Int -- name |-> repesentitive name
   f eqvs = {-trace ("eqvClasses':\n"++unlines [Map.findWithDefault (error "eqvClass'") i nameInv ++ " -> " ++ Map.findWithDefault (error "eqvClasses'") j nameInv | (i, j) <- Map.toList eqvs])-} result where
     inv :: Map.Map [(Int, [Int])] [Int{-old name-}] -- [(ctor, [nt])] |-> member names
-    inv = foldr (uncurry (Map.insertWith (++))) Map.empty (map renameProds pList)
+    inv = foldr (uncurry (Map.insertWith (++)) . renameProds) Map.empty pList
     renameProds :: (Int, [(Int, [Int])]) -> ([(Int, [Int])], [Int])
     renameProds (n, rhs) = (map renameProd rhs, [n])
     renameProd (c, args) = (c, map renameName args)
@@ -226,14 +232,14 @@ eqvClasses' nameInv p = iter f init where
 -- TODO: optimize shrink for two states and lots of prods since many TA are like that
 -- | Optimizes a grammar by first calculating equivalence classes and then normalizing the grammar.
 shrink :: Grammar -> Grammar
-shrink g = normalize (eqvClasses ({-elimSingleEps2-} g))
+shrink g = normalize (eqvClasses {-elimSingleEps2-} g)
 
 eqvClasses :: Grammar -> Grammar
 eqvClasses (Grammar s p) = Grammar sFinal pFinal where
   Grammar sEps pEps = {-dedup $-} epsilonClosure (Grammar s p)
 
   names :: [Name]
-  names = nub $ sort $ s : (Map.keys p)
+  names = nub $ sort $ s : Map.keys p
   nameMap = Map.fromList (zip names [1..])
   nameInv = Map.fromList (zip [1..] names)
 
@@ -254,7 +260,7 @@ eqvClasses (Grammar s p) = Grammar sFinal pFinal where
   renaming = eqvClasses' nameInv p'
 
   renamingInv :: Map.Map Int{-new name-} [Int]{-old name-}
-  renamingInv = foldr (uncurry (Map.insertWith (++))) Map.empty (map (\(n,n') -> (n', [n])) (Map.toList renaming))
+  renamingInv = foldr (uncurry (Map.insertWith (++)) . (\(n,n') -> (n', [n]))) Map.empty (Map.toList renaming)
 
   renameName :: Name -> Name
   renameName n = {-trace ("renameName "++n++" -> "++n') $-} n' where
@@ -327,7 +333,7 @@ elimSingleCtor (Grammar s p) = normalize (Grammar s (Map.map (map f) p)) where
 
 -- | Eliminates non-terminals that are used only once when that one time is an epsilon transition
 elimSingleUse (Grammar s p) = normalize (Grammar s (Map.map replaceSingleUse p)) where
-  replaceSingleUse prods = concat (map replaceSingleUseProd prods)
+  replaceSingleUse prods = concatMap replaceSingleUseProd prods
   replaceSingleUseProd (Eps n)
     | n `elem` singleUse = fromJust (Map.lookup n p)
   replaceSingleUseProd x = [x]
@@ -352,9 +358,9 @@ dropEmpty (Grammar s p) = Grammar s (Map.map filterProds (Map.filterWithKey (\k 
   invMap = Map.fromList $
            map (\xs -> (snd (head xs), nub $ sort $ map fst xs)) $
            groupBy (\a b -> snd a == snd b) $
-           sortBy (\a b -> snd a `compare` snd b) $
+           sortBy (\a b -> snd a `compare` snd b)
            [(l, x) | (l, r) <- Map.toList p, x <- concatMap rhsNames r]
-  nulls = nub $ sort $ [l | (l, r) <- Map.toList p, Ctor _ [] <- r]
+  nulls = nub $ sort [l | (l, r) <- Map.toList p, Ctor _ [] <- r]
   f :: Name -> State (Set.Set Name) ()
   f n = do r <- get
            unless (Set.member n r) $ do
@@ -370,7 +376,7 @@ dropUnreachable (Grammar s p) = Grammar s (Map.filterWithKey (\k _ -> Set.member
   f n = do r <- get
            unless (Set.member n r) $ do
              put (Set.insert n r)
-             sequence_ [mapM_ f (rhsNames x) | x <- case Map.lookup n p of Just y -> y; Nothing -> error ("error.dropUnreachable:"++show (n,s,p))]
+             sequence_ [mapM_ f (rhsNames x) | x <- fromMaybe (error ("error.dropUnreachable:"++show (n,s,p))) (Map.lookup n p)]
 
 -- | Remove useless productions.
 -- We drop unreachable first because that plays better with laziness.
@@ -381,26 +387,11 @@ normalize = dropUnreachable . dropEmpty . dropUnreachable
 intersectGrammar' :: Grammar -> Grammar -> Grammar
 intersectGrammar' g1 g2 = normalize $ intersection g1 g2
 
-shortNamesNames :: [String]
-shortNamesNames = f ++ f' where
-  f = map (:[]) $ ['A' .. 'Z'] ++ ['a' .. 'z']
-  f' = (++) <$> shortNamesNames <*> f
-
-shortNames :: Grammar -> Grammar
-shortNames (Grammar s p) = Grammar s' p' where
-  subst :: Map.Map String String
-  subst = Map.fromList (zip (Map.keys p) shortNamesNames)
-  renameName n = Map.findWithDefault (error "shortNames") n subst
-  renameRhs (Ctor c ns) = Ctor c (map renameName ns)
-  renameRhs (Eps n) = Eps (renameName n)
-  s' = renameName s
-  p' = Map.mapKeys renameName (Map.map (map renameRhs) p)
-
--- Add productions for all terminals named in the grammar (assumes terminal names start with '"')
+-- | Add productions for all terminals named in the grammar (assumes terminal names start with '"')
 addTerminals :: Grammar -> Grammar
 addTerminals (Grammar start prods) = Grammar start (Map.fromList $ Map.toList prods ++ terminals) where
-  terminals = nub $ sort $
-    [(t, [Ctor t []]) | (_,  rhs) <- Map.toList prods, t@('"':_) <- concatMap rhsNames rhs]
+  terminals = nub $ sort
+    [ (t, [Ctor t []]) | (_,  rhs) <- Map.toList prods, t <- concatMap rhsNames rhs, Text.head t == '"']
 
 {- Old method of complementing TA (never fully implemented)
 ----------------------------- NEW STUFF
