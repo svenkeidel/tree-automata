@@ -23,6 +23,7 @@ import           Control.DeepSeq
 import           Control.Monad.Except hiding (sequence)
 import           Control.Monad.State hiding (sequence)
 
+import           Data.Either
 import           Data.List hiding (union)
 import qualified Data.Map as Map
 import           Data.Maybe
@@ -55,7 +56,7 @@ instance Show Grammar where
       g lhs (Eps n) = Text.unpack lhs ++ ": " ++ Text.unpack n
 
 instance Eq Grammar where
-  g1 == g2 = isJust $ eqGrammar g1 g2
+  g1 == g2 = isRight $ eqGrammar g1 g2
 
 -- TODO: Naming context in grammar
 instance NFData Grammar where
@@ -86,16 +87,12 @@ sequence start label (Grammar start1 prods1) (Grammar start2 prods2) =
                  Map.unionWith (++) prods1 prods2)
 
 -- | Test the equality of two regular tree grammars
-eqGrammar :: Grammar -> Grammar -> Maybe [(Either String (), [(Name, Name)])]
+eqGrammar :: Grammar -> Grammar -> Either String ()
 eqGrammar g1 g2 = eqGrammar' (epsilonClosure g1) (epsilonClosure g2)
 
 -- | Test equality without doing epsilon closure first
-eqGrammar' :: Grammar -> Grammar -> Maybe [(Either String (), [(Name, Name)])]
-eqGrammar' (Grammar s1 ps1) (Grammar s2 ps2) =
---  trace ("eqGrammar': " ++ s1 ++ " " ++ s2) $
-  case [r | r@(Right _, _) <- rs] of
-    [] -> Just rs
-    _ -> Nothing
+eqGrammar' :: Grammar -> Grammar -> Either String ()
+eqGrammar' (Grammar s1 ps1) (Grammar s2 ps2) = fst (head rs)
   where
   rs = runStateT (runExceptT (f s1 s2)) []
   f :: Name -> Name -> ExceptT String (StateT [(Name, Name)] []) ()
@@ -104,14 +101,12 @@ eqGrammar' (Grammar s1 ps1) (Grammar s2 ps2) =
     case lookup s1 mapping of
       Just s1' | s1' == s2 -> return ()
                | otherwise -> throwError $ "Name already assigned: " ++ show (s1, s1', s2)
-      Nothing -> do {-trace ("putting: " ++ s1 ++ " -> " ++ s2) $-}
+      Nothing -> do
                     put ((s1, s2) : mapping)
-                    let p1 = sort $ map (s1,) $ Map.findWithDefault (error "eqGrammar'.findWithDefault.p1") s1 ps1
-                        p2 = sort $ map (s2,) $ Map.findWithDefault (error "eqGrammar'.findWithDefault.p2") s2 ps2
+                    let p1 = sort $ map (s1,) $ Map.findWithDefault (error ("Name " ++ show s1 ++ " not in the grammar")) s1 ps1
+                        p2 = sort $ map (s2,) $ Map.findWithDefault (error ("Name " ++ show s2 ++ " not in the grammar")) s2 ps2
                     if length p1 /= length p2
-                    then let p1ctors = [c | (_, Ctor c _) <- p1]
-                             p2ctors = [c | (_, Ctor c _) <- p2]
-                         in throwError $ "Different number of productions: " ++ intercalate " !!!!! " [show s1, show s2, show $ length p1, show $ length p2, show $ zip p1ctors p2ctors, show p1ctors, show p2ctors, unlines $ map show p1, unlines $ map show p2]
+                    then throwError $ "Different number of productions: " ++ unlines (map show p1) ++ unlines (map show p2)
                     else do let p1' = [p | p@(_, Ctor _ _) <- p1] ++ [p | p@(_, Eps _) <- p1]
                             p2' <- lift $ lift $ map ([p | p@(_, Ctor _ _) <- p2]++) $ permutations [p | p@(_, Eps _) <- p2]
                             zipWithM_ g p1' p2'
@@ -160,7 +155,7 @@ epsilonClosure (Grammar s p) = Grammar s (Map.mapWithKey (\k _ -> close k) p) wh
     r <- get
     unless (Set.member n r) $ do
       put (Set.insert n r)
-      sequence_ [epsReach k | Eps k <- Map.findWithDefault (error ("epsilonClosure.findWithDefault"++show n)) n p]
+      sequence_ [epsReach k | Eps k <- Map.findWithDefault (error ("Name " ++ show n ++ " not in the grammar")) n p]
 
 
 introduceEpsilons :: Grammar -> Grammar
