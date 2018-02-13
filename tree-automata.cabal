@@ -30,3 +30,4 @@ library
                      , text
                      , text-show
                      , deepseq
+                     , hashable

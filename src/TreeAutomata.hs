@@ -19,11 +19,13 @@ module TreeAutomata
   ) where
 
 import           Prelude hiding (sequence)
+
 import           Control.DeepSeq
 import           Control.Monad.Except hiding (sequence)
 import           Control.Monad.State hiding (sequence)
 
 import           Data.Either
+import           Data.Hashable
 import           Data.List hiding (union)
 import qualified Data.Map as Map
 import           Data.Maybe
@@ -64,6 +66,15 @@ instance NFData Grammar where
 instance NFData Rhs where
   rnf (Ctor c ns) = rnf c `seq` rnf ns
   rnf (Eps n) = rnf n
+
+instance Hashable Grammar where
+  hashWithSalt s (Grammar start prods) = s `hashWithSalt` (0::Int) `hashWithSalt` start `hashWithSalt` prods'
+    where
+      prods' = Map.foldrWithKey (\k v hash -> hash `hashWithSalt` k `hashWithSalt` v) (1::Int) prods
+
+instance Hashable Rhs where
+  hashWithSalt s (Ctor ctor args) = s `hashWithSalt` (0::Int) `hashWithSalt` ctor `hashWithSalt` args
+  hashWithSalt s (Eps name) = s `hashWithSalt` (1::Int) `hashWithSalt` name
 
 -- | Empty regular tree grammar
 empty :: Name -> Grammar
