@@ -54,8 +54,8 @@ instance Show Grammar where
       f :: (Text, [Rhs]) -> String
       f (lhs, rhs) = unlines (map (g lhs) $ sort rhs)
       g :: Text -> Rhs -> String
-      g lhs (Ctor c ns) = Text.unpack lhs ++ ":" ++ Text.unpack c ++ ": " ++ Text.unpack (Text.unwords ns)
-      g lhs (Eps n) = Text.unpack lhs ++ ": " ++ Text.unpack n
+      g lhs (Ctor c ns) = Text.unpack lhs ++ " → " ++ Text.unpack c ++ "(" ++ Text.unpack (Text.intercalate ", " ns) ++ ")"
+      g lhs (Eps n) = Text.unpack lhs ++ " → " ++ Text.unpack n
 
 instance Eq Grammar where
   g1 == g2 = isRight $ eqGrammar g1 g2
