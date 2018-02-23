@@ -40,12 +40,10 @@ import           System.IO.Unsafe
 
 import           Util
 
--- Data types for TreeAutomata
 type Ctor = Text -- Tree-constructor labels
 type Name = Text -- Non-terminal names
 data Rhs = Ctor Ctor [Name] | Eps Name deriving (Show, Eq, Ord)
 type Prod = (Name, Rhs)
--- TODO: rename Grammar to TreeAutomata
 -- The second field of `Grammar` is strict so whnf is enough to get real benchmark numbers
 data Grammar = Grammar Name !(Map.Map Name [Rhs]) deriving (Ord)
 type CtorInfo = Map.Map Ctor Arity
@@ -135,7 +133,7 @@ eqGrammar' (Grammar s1 ps1) (Grammar s2 ps2) = fst (head rs)
 
 intersection :: Grammar -> Grammar -> Grammar
 intersection (Grammar s1 p1) (Grammar s2 p2) = Grammar (intersectName s1 s2) (Map.fromList prods) where
-  intersectName :: Text -> Text -> Text
+  intersectName :: Name -> Name -> Name
   intersectName n1 n2 = Text.concat ["(", n1, ",", n2, ")"]
   prods = [(intersectName n1 n2,
             [Ctor c1 (zipWith intersectName x1 x2)
@@ -168,9 +166,9 @@ rhsNames (Eps n) = [n]
 
 constructorInfo :: Grammar -> CtorInfo
 constructorInfo (Grammar _ p) = r where
-  r = case filter ((>1) . length) $ groupBy g $ ctors of
-        [] -> Map.fromList ctors
-        err -> error ("Inconsistent constructors: " ++ show err)
+  r = case filter ((>1) . length) $ groupBy g ctors of
+    [] -> Map.fromList ctors
+    err -> error ("Inconsistent constructors: " ++ show err)
   ctors = nub $ sort $ concatMap f $ concat $ Map.elems p
   f (Ctor c n) = [(c, length n)]
   f (Eps _) = []
@@ -186,7 +184,6 @@ epsilonClosure (Grammar s p) = Grammar s (Map.mapWithKey (\k _ -> close k) p) wh
     unless (Set.member n r) $ do
       put (Set.insert n r)
       sequence_ [epsReach k | Eps k <- Map.findWithDefault (error ("Name " ++ show n ++ " not in the grammar")) n p]
-
 
 introduceEpsilons :: Grammar -> Grammar
 introduceEpsilons g = Grammar start $ Map.mapWithKey go prodMap where
@@ -210,14 +207,13 @@ introduceEpsilons g = Grammar start $ Map.mapWithKey go prodMap where
        else warn $ Eps (fst best') : go (Text.concat ["<", key, ">"]) (Set.toList $ Set.fromList prods `Set.difference` Set.fromList (snd best'))
 
 substNames :: [[Name]] -> Grammar -> Grammar
-substNames e g = foldr (subst . sort) g e where
-  subst :: [Name] -> Grammar -> Grammar
-  subst (n : ns) g = foldr (flip subst1 n) g ns
+substNames e g = foldr (subst . sort) g e
 
 substNamesOrdered :: [[Name]] -> Grammar -> Grammar
-substNamesOrdered e g = foldr subst g e where
-  subst :: [Name] -> Grammar -> Grammar
-  subst (n : ns) g = foldr (flip subst1 n) g ns
+substNamesOrdered e g = foldr subst g e
+
+subst :: [Name] -> Grammar -> Grammar
+subst (n : ns) g = foldr (`subst1` n) g ns
 
 subst1 :: Name -> Name -> Grammar -> Grammar
 subst1 n1 n2 (Grammar s p) = Grammar (substS n1 n2 s) (Map.fromList p') where
@@ -388,7 +384,7 @@ dropEmpty (Grammar s p) = Grammar s (Map.map filterProds (Map.filterWithKey (\k 
   nulls = nub $ sort [l | (l, r) <- Map.toList p, Ctor _ [] <- r]
   f :: Name -> State (Set.Set Name) ()
   f n = do r <- get
-           unless (Set.member n r) $ do
+           unless (Set.member n r) $
              when (any (all (`Set.member` r) . rhsNames) (case Map.lookup n p of Just x -> x)) $ do
                put (Set.insert n r)
                sequence_ [f x | x <- Map.findWithDefault [] n invMap]
