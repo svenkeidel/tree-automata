@@ -26,6 +26,7 @@ import           Control.Monad.State hiding (sequence)
 
 import           Data.Either
 import           Data.Hashable
+import           Data.IORef
 import           Data.List hiding (union)
 import qualified Data.Map as Map
 import           Data.Maybe
@@ -34,6 +35,8 @@ import           Data.Text (Text)
 import qualified Data.Text as Text
 
 import           Debug.Trace
+
+import           System.IO.Unsafe
 
 import           Util
 
@@ -84,18 +87,20 @@ empty start = Grammar start (Map.fromList [(start, [])])
 wildcard :: CtorInfo -> Name -> Grammar
 wildcard ctxt start = Grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, i) <- Map.toList ctxt])])
 
--- | Union of the languages of two grammars. The first string argument
--- becomes the new start symbol and should be unique.
-union :: Text -> Grammar -> Grammar -> Grammar
-union start (Grammar start1 prods1) (Grammar start2 prods2) =
-  Grammar start (Map.insert start [Eps start1, Eps start2] $
-                   Map.unionWith (++) prods1 prods2)
+-- | Union of two grammars. A new, unique start symbol is automatically created.
+union :: Grammar -> Grammar -> Grammar
+union (Grammar start1 prods1) (Grammar start2 prods2) = Grammar start prods
+  where
+    start = uniqueStart
+    prods = Map.insert start [Eps start1, Eps start2] $ Map.unionWith (++) prods1 prods2
 
-sequence :: Name -> Name -> Grammar -> Grammar -> Grammar
-sequence start label (Grammar start1 prods1) (Grammar start2 prods2) =
+sequence :: Name -> Grammar -> Grammar -> Grammar
+sequence label (Grammar start1 prods1) (Grammar start2 prods2) =
   Grammar start (Map.insert start [Eps start1] $
                  Map.insertWith (++) label [Eps start2] $
                  Map.unionWith (++) prods1 prods2)
+  where
+    start = uniqueStart
 
 -- | Test the equality of two regular tree grammars
 eqGrammar :: Grammar -> Grammar -> Either String ()
@@ -141,6 +146,20 @@ intersection (Grammar s1 p1) (Grammar s2 p2) = Grammar (intersectName s1 s2) (Ma
             [Eps (intersectName n1 x) | Eps x <- r2])
            | (n1, r1) <- Map.toList p1,
              (n2, r2) <- Map.toList p2]
+
+freshInt :: IORef Int
+freshInt = unsafePerformIO (newIORef 0)
+{-# NOINLINE freshInt #-}
+
+fresh :: Int
+fresh = unsafePerformIO $ do
+  x <- readIORef freshInt
+  writeIORef freshInt (x+1)
+  return x
+{-# NOINLINE fresh #-}
+
+uniqueStart :: Text
+uniqueStart = Text.append "Start" $ Text.pack $ show fresh
 
 -- list the names that occur in a Rhs
 rhsNames :: Rhs -> [Name]
