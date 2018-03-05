@@ -31,3 +31,16 @@ library
                      , text-show
                      , deepseq
                      , hashable
+
+test-suite specs
+  type:                exitcode-stdio-1.0
+  ghc-options:         -Wall
+  hs-source-dirs:      test
+  main-is:             Spec.hs
+  build-depends:       base
+                     , containers
+                     , hspec
+                     , HUnit
+                     , text
+                     , tree-automata
+  default-language:    Haskell2010

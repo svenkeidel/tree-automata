@@ -86,11 +86,16 @@ wildcard :: CtorInfo -> Name -> Grammar
 wildcard ctxt start = Grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, i) <- Map.toList ctxt])])
 
 -- | Union of two grammars. A new, unique start symbol is automatically created.
+-- If either of the grammars is empty, the other is returned as-is.
 union :: Grammar -> Grammar -> Grammar
-union (Grammar start1 prods1) (Grammar start2 prods2) = Grammar start prods
+union g1 g2 | isEmpty g1 = g2
+            | isEmpty g2 = g1
+            | otherwise = Grammar start prods
   where
+    (Grammar start1 prods1) = g1
+    (Grammar start2 prods2) = g2
     start = uniqueStart
-    prods = Map.insert start [Eps start1, Eps start2] $ Map.unionWith (++) prods1 prods2
+    prods = Map.insert start (nub [Eps start1, Eps start2]) $ Map.unionWith (\r1 r2 -> nub $ r1 ++ r2) prods1 prods2
 
 sequence :: Name -> Grammar -> Grammar -> Grammar
 sequence label (Grammar start1 prods1) (Grammar start2 prods2) =
