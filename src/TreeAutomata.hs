@@ -199,13 +199,13 @@ eqGrammar' (Grammar s1 ps1) (Grammar s2 ps2) = fst (head rs)
                | otherwise -> throwError $ "Name already assigned: " ++ show (s1, s1', s2)
       Nothing -> do
                     put ((s1, s2) : mapping)
-                    let p1 = sort $ map (s1,) $ Map.findWithDefault (error ("Name " ++ show s1 ++ " not in the grammar")) s1 ps1
-                        p2 = sort $ map (s2,) $ Map.findWithDefault (error ("Name " ++ show s2 ++ " not in the grammar")) s2 ps2
+                    let p1 = sort $ map (s1,) $ fromJust $ Map.lookup s1 ps1
+                        p2 = sort $ map (s2,) $ fromJust $ Map.lookup s2 ps2
                     if length p1 /= length p2
                     then throwError $ "Different number of productions: " ++ unlines (map show p1) ++ unlines (map show p2)
-                    else do let p1' = [p | p@(_, Ctor _ _) <- p1] ++ [p | p@(_, Eps _) <- p1]
+                    else do let {-p1' = [p | p@(_, Ctor _ _) <- p1] ++ [p | p@(_, Eps _) <- p1]-}
                             p2' <- lift $ lift $ map ([p | p@(_, Ctor _ _) <- p2]++) $ permutations [p | p@(_, Eps _) <- p2]
-                            zipWithM_ g p1' p2'
+                            zipWithM_ g p1 p2'
   g :: Prod -> Prod -> ExceptT String (StateT [(Name, Name)] []) ()
   g (l1, Ctor c1 p1) (l2, Ctor c2 p2)
       | c1 /= c2 = throwError $ "Mismatched ctors: " ++ show (l1, Ctor c1 p1, l2, Ctor c2 p2)
@@ -240,7 +240,7 @@ fresh = unsafePerformIO $ do
 uniqueStart :: Text
 uniqueStart = Text.append "Start" $ Text.pack $ show fresh
 
--- list the names that occur in a Rhs
+-- | List the names that occur in a Rhs.
 rhsNames :: Rhs -> [Name]
 rhsNames (Ctor _ ns) = ns
 rhsNames (Eps n) = [n]
@@ -287,9 +287,6 @@ introduceEpsilons g = Grammar start $ Map.mapWithKey go prodMap where
        then prods
        else warn $ Eps (fst best') : go (Text.concat ["<", key, ">"]) (Set.toList $ Set.fromList prods `Set.difference` Set.fromList (snd best'))
 
-substNames :: [[Name]] -> Grammar -> Grammar
-substNames e g = foldr (subst . sort) g e
-
 substNamesOrdered :: [[Name]] -> Grammar -> Grammar
 substNamesOrdered e g = foldr subst g e
 
@@ -301,10 +298,10 @@ subst1 n1 n2 (Grammar s p) = Grammar (substS n1 n2 s) (Map.fromList p') where
   p' = map h $ groupBy f $ sort $ concatMap (substP n1 n2) (Map.toList p)
   f (c1, _) (c2, _) = c1 == c2
   h (xs@((ctor,_):_)) = (ctor, filter (/= Eps ctor) $ nub $ sort $ concatMap snd xs)
-substP n1 n2 (lhs, rhs) = [(substS n1 n2 lhs, nub $ sort $ map (substR n1 n2) rhs)]
-substS n1 n2 s = if n1 == s then n2 else s
-substR n1 n2 (Eps s) = Eps (substS n1 n2 s)
-substR n1 n2 (Ctor c ns) = Ctor c (map (substS n1 n2) ns)
+  substP n1 n2 (lhs, rhs) = [(substS n1 n2 lhs, nub $ sort $ map (substR n1 n2) rhs)]
+  substS n1 n2 s = if n1 == s then n2 else s
+  substR n1 n2 (Eps s) = Eps (substS n1 n2 s)
+  substR n1 n2 (Ctor c ns) = Ctor c (map (substS n1 n2) ns)
 
 eqvClasses' :: Map.Map Int Name -> Map.Map Int [(Int, [Int])] -> Map.Map Int{-old name-} Int{-new name-}
 eqvClasses' nameInv p = iter f init where
@@ -470,7 +467,7 @@ dropEmpty (Grammar s p) = Grammar s (Map.map filterProds (Map.filterWithKey (\k 
                put (Set.insert n r)
                sequence_ [f x | x <- Map.findWithDefault [] n invMap]
 
--- Remove productions that are not reachable form the start
+-- | Remove productions that are not reachable form the start
 dropUnreachable :: Grammar -> Grammar
 dropUnreachable (Grammar s p) = Grammar s (Map.filterWithKey (\k _ -> Set.member k reachables) p) where
   reachables = execState (f s) Set.empty
@@ -478,41 +475,13 @@ dropUnreachable (Grammar s p) = Grammar s (Map.filterWithKey (\k _ -> Set.member
   f n = do r <- get
            unless (Set.member n r) $ do
              put (Set.insert n r)
-             sequence_ [mapM_ f (rhsNames x) | x <- fromMaybe (error ("error.dropUnreachable:"++show (n,s,p))) (Map.lookup n p)]
+             sequence_ [mapM_ f (rhsNames x) | x <- fromMaybe (error ("Name " ++ show n ++ " not in the grammar")) (Map.lookup n p)]
 
 -- | Remove useless productions.
 -- We drop unreachable first because that plays better with laziness.
 -- But we also drop unreachable after droping empty, because the empty may lead to unreachable.
 normalize :: Grammar -> Grammar
 normalize = dropUnreachable . dropEmpty . dropUnreachable
-
--- | Add productions for all terminals named in the grammar (assumes terminal names start with '"')
-addTerminals :: Grammar -> Grammar
-addTerminals (Grammar start prods) = Grammar start (Map.fromList $ Map.toList prods ++ terminals) where
-  terminals = nub $ sort
-    [ (t, [Ctor t []]) | (_,  rhs) <- Map.toList prods, t <- concatMap rhsNames rhs, Text.head t == '"']
-
-{- Old method of complementing TA (never fully implemented)
------------------------------ NEW STUFF
-complement :: Name -> [(Ctor, Int)] -> Grammar -> Grammar
-complement any constructorInfo g = Grammar start prods' where
-  (Grammar start prods) = g
-  prods' = Map.fromList [(lhs, concat [comp lhs ctor | ctor <- constructorInfo])
-                        | (lhs, _) <- Map.toList prods]
-  comp lhs (ctor, ctorSize) =
-    case getCtor lhs ctor of
-      [] -> [Ctor ctor (replicate ctorSize any)]
-      [rhs] -> [Ctor ctor ((replicate i any) ++ [rhs !! i] ++ (replicate (ctorSize - i - 1) any))
-               | i <- [0 .. ctorSize - 1]]
-      x -> error ("complement: too many ctor: " ++ show x)
-  getCtor lhs ctor = [rhs | Ctor ctor' rhs <- case Map.lookup lhs prods of Just x -> x, ctor' == ctor]
-
-complement' :: Name -> Grammar -> Grammar -> Grammar
-complement' any (Grammar _ prods) g = complement any constructorInfo' g where
-  constructorInfo' = nub $ sort $ [(c, length rhs)| (_, ps) <- Map.toList prods, (Ctor c rhs) <- ps]
-
---complementTest g = ??? where
---  Grammar "start" [("start", Ctor "PreIncrement" [any, any])]
 
 {-
 -- NOTE: assumes (1) no epsilons, (2) fixed arity labels, and (3) that tokens are identical for identical labels
@@ -550,7 +519,6 @@ determinize (Grammar s m) = result where
   s' :: Set (Set Name)
   s' = Set.fromList [qs | (qs, rhs) <- finalProds, not (Set.null (s `Set.intersection` qs))]
   result = Grammar s' (smapFromList finalProds)
--}
 
 -- Prods is a radix tree on the arguments to a constructor
 data Prods = Prods
