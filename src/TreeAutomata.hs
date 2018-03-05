@@ -11,6 +11,7 @@ module TreeAutomata
   , union
   , intersection
   , sequence
+  , isEmpty
   , isProductive
   , shrink
   , normalize
@@ -105,6 +106,14 @@ sequence label (Grammar start1 prods1) (Grammar start2 prods2) =
                  Map.unionWith (++) prods1 prods2)
   where
     start = uniqueStart
+
+-- | Test whether the given grammar generates the empty language.  In
+-- regular tree automata, emptiness can be tested by computing whether
+-- any reachable state is a finite state. In a regular tree grammar,
+-- this comes down to computing whether the start symbol is
+-- productive.
+isEmpty :: Grammar -> Bool
+isEmpty g@(Grammar start prods) = not $ isProductive start g
 
 -- | Tests whether the given nonterminal is productive in the given
 -- grammar.

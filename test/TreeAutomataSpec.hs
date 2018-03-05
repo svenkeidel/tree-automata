@@ -35,6 +35,22 @@ spec = do
     it "should give all nonterminals for the union of PCF and simple" $
       map (`isProductive` pcf_simple) ["Start0", "PStart", "S", "A", "G", "F", "Exp", "Type", "Type"] `shouldBe` [True, True, True, True, True, True, True, True, True]
 
+  describe "Emptiness" $ do
+    it "should be true on the empty grammar" $
+      isEmpty (TreeAutomata.empty "Start") `shouldBe` True
+
+    it "should be true on the infinite infinite grammar" $
+      isEmpty infinite `shouldBe` True
+
+    it "should be false on the simple grammar" $
+      isEmpty simple `shouldBe` False
+
+    it "should be false on the PCF grammar" $
+      isEmpty pcf `shouldBe` False
+
+    it "should be false on the subset of PCF" $
+      isEmpty pcf_sub `shouldBe` False
+
   describe "Union" $ do
     it "should work on the union of two small grammars" $
       let g1 = Grammar "Start1" $ M.fromList [ ("Start1", [ Eps "Exp" ])
