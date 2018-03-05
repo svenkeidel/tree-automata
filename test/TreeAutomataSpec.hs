@@ -88,6 +88,38 @@ spec = do
       intersection simple infinite `shouldBeLiteral` (Grammar "S⨯EStart" M.empty)
       intersection infinite simple `shouldBeLiteral` (Grammar "EStart⨯S" M.empty)
 
+  describe "Inclusion" $ do
+    it "should work for the worked out example" $
+      let g = Grammar "S" $ M.fromList [("S", [ Ctor "f" ["A"]
+                                              , Ctor "c" []
+                                              , Ctor "f" ["B"]])
+                                       ,("A", [ Ctor "g" ["S"]
+                                              , Ctor "e" []])
+                                       ,("B", [ Ctor "b" []])]
+          g' = Grammar "S'" $ M.fromList [("S'", [ Ctor "f" ["A'"]
+                                                 , Ctor "c" []
+                                                 , Ctor "f" ["B'"]])
+                                         ,("A'", [ Ctor "g" ["S'"]
+                                                 , Ctor "e" []])
+                                         ,("B'", [ Ctor "b" []])]
+      in g `subsetOf` g' `shouldBe` True
+
+    it "should be true for the PCF grammar and a subset of the PCF grammar" $
+      pcf_sub `subsetOf` pcf `shouldBe` True
+
+    it "should not work when the arguments are inverted" $
+      pcf `subsetOf` pcf_sub `shouldBe` False
+
+    it "reflexivity should hold on PCF" $
+      pcf `subsetOf` pcf `shouldBe` True
+
+    it "reflexivity should hold on simple" $
+      simple `subsetOf` simple `shouldBe` True
+
+    it "should not hold for languages that do not intersect" $ do
+      simple `subsetOf` pcf `shouldBe` False
+      pcf `subsetOf` simple `shouldBe` False
+
   where
     simple = Grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
                                       , ("A", [ Ctor "a" [] ])

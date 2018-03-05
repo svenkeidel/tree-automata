@@ -11,8 +11,10 @@ module TreeAutomata
   , union
   , intersection
   , sequence
+  , subsetOf
   , isEmpty
   , isProductive
+  , removeUnproductive
   , shrink
   , normalize
   , elimSingles
@@ -107,6 +109,41 @@ sequence label (Grammar start1 prods1) (Grammar start2 prods2) =
   where
     start = uniqueStart
 
+data Constraint = Constraint (Name, Name) | Trivial Bool deriving (Show)
+type ConstraintSet = Map.Map (Name,Name) [[Constraint]]
+
+-- | Test whether the first grammar is a subset of the second, i.e. whether
+-- L(g1) ⊆ L(g2).
+subsetOf :: Grammar -> Grammar -> Bool
+g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) where
+  (Grammar s1 p1) = epsilonClosure $ removeUnproductive g1
+  (Grammar s2 p2) = epsilonClosure $ removeUnproductive g2
+  solve :: (Name, Name) -> ConstraintSet -> Bool
+  solve pair constraints = case Map.lookup pair constraints of
+    Just deps -> and (map or (map (map (\c -> case c of Trivial t -> t; Constraint p -> solve p constraints)) deps))
+    Nothing -> False
+  generate :: ConstraintSet -> Set.Set (Name,Name) -> ConstraintSet
+  generate constraints toTest | Set.null toTest = constraints
+                              | otherwise = do
+                                  let (a1,a2) = Set.elemAt 0 toTest
+                                  let toTest' = Set.deleteAt 0 toTest
+                                  let dependencies = map (map (\c -> case c of Trivial t -> Trivial t
+                                                                               Constraint pair -> if pair `elem` Map.keys constraints || pair == (a1,a2)
+                                                                                 then Trivial True
+                                                                                 else Constraint pair)) $ shareCtor a1 a2
+                                  let constraints' = if not (null dependencies)
+                                        then Map.insert (a1,a2) dependencies constraints
+                                        else constraints
+                                  let toTest'' = Set.union toTest' (Set.fromList [ (a1,a2) | pairs <- dependencies, Constraint (a1,a2) <- pairs, not $ elem (a1,a2) (Map.keys constraints') ])
+                                  generate constraints' toTest''
+  shareCtor :: Name -> Name -> [[Constraint]]
+  shareCtor a1 a2 = [ [ r | r2 <- fromJust $ Map.lookup a2 p2, r <- match r1 r2 ] | r1 <- fromJust $ Map.lookup a1 p1 ]
+  match :: Rhs -> Rhs -> [Constraint]
+  match r1 r2 = case (r1, r2) of
+    (Ctor c args, Ctor c' args') | c == c' && length args == length args' -> if length args > 0 then zipWith (\a1 a2 -> Constraint (a1,a2)) args args' else [Trivial True]
+    (Eps e, Eps e') | e == e' -> [Constraint (e,e')]
+    _ -> [Trivial False]
+
 -- | Test whether the given grammar generates the empty language.  In
 -- regular tree automata, emptiness can be tested by computing whether
 -- any reachable state is a finite state. In a regular tree grammar,
@@ -119,6 +156,12 @@ isEmpty g@(Grammar start prods) = not $ isProductive start g
 -- grammar.
 isProductive :: Name -> Grammar -> Bool
 isProductive n g = Set.member n $ productive g
+
+-- | Removes all nonproductive non-terminals from the given grammar.
+removeUnproductive :: Grammar -> Grammar
+removeUnproductive (Grammar start prods) = Grammar start prods' where
+  prodNs = productive (Grammar start prods)
+  prods' = Map.filterWithKey (\k _ -> k `Set.member` prodNs) prods
 
 -- | Returns all productive nonterminals in the given grammar.
 productive :: Grammar -> Set.Set Name
