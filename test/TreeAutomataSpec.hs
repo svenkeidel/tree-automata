@@ -32,12 +32,35 @@ spec = do
     it "should work on the union of the simple and PCF grammars" $
       union pcf simple `shouldBeLiteral` pcf_simple
 
+  describe "Intersection" $ do
+    it "of a subset of the PCF grammar should be that subset" $
+      intersection pcf pcf_sub `shouldBeLiteral` (Grammar "PStart⨯PSStart" $
+                                                  M.fromList [ ("Exp⨯Exp", [ Ctor "Zero" []
+                                                                           , Ctor "Succ" ["Exp⨯Exp"]
+                                                                           , Ctor "Pred" ["Exp⨯Exp"]])
+                                                             , ("PStart⨯PSStart", [ Ctor "Zero" []
+                                                                                  , Ctor "Succ" ["Exp⨯Exp"]
+                                                                                  , Ctor "Pred" ["Exp⨯Exp"]
+                                                                                  , Ctor "Num" []
+                                                                                  , Ctor "Fun" [ "Type⨯Type", "Type⨯Type" ]])
+                                                             , ("Type⨯Type", [ Ctor "Num" []
+                                                                             , Ctor "Fun" [ "Type⨯Type", "Type⨯Type" ]])])
+
+    it "should give an empty grammar if the arguments have no intersection" $ do
+      intersection simple pcf `shouldBeLiteral` (Grammar "S⨯PStart" M.empty)
+
+    it "should give an empty grammar when one of the arguments is an empty grammar" $ do
+      intersection simple infinite `shouldBeLiteral` (Grammar "S⨯EStart" M.empty)
+      intersection infinite simple `shouldBeLiteral` (Grammar "EStart⨯S" M.empty)
+
   where
     simple = Grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
                                       , ("A", [ Ctor "a" [] ])
                                       , ("G", [ Ctor "g" [ "G" ]
                                               , Ctor "g" [ "A" ]])
                                       , ("F", [ Ctor "f" [ "G", "G" ]])]
+    infinite = Grammar "EStart" $ M.fromList [ ("EStart", [ Eps "foo" ])
+                                             , ("foo", [ Ctor "Bar" ["foo"]])]
     pcf = Grammar "PStart" $ M.fromList [ ("PStart", [ Eps "Exp"
                                                      , Eps "Type" ])
                                         , ("Exp", [ Ctor "App" ["Exp", "Exp"]
@@ -49,6 +72,13 @@ spec = do
                                         , ("Type", [ Ctor "Num" []
                                                    , Ctor "Fun" ["Type", "Type"]])
                                         , ("String", [ Ctor "String" [] ])]
+    pcf_sub = Grammar "PSStart" $ M.fromList [ ("PSStart", [ Eps "Exp"
+                                                           , Eps "Type" ])
+                                             , ("Exp", [ Ctor "Succ" [ "Exp" ]
+                                                       , Ctor "Pred" [ "Exp" ]
+                                                       , Ctor "Zero" []])
+                                             , ("Type", [ Ctor "Num" []
+                                                        , Ctor "Fun" ["Type", "Type"]])]
     pcf_simple = Grammar "Start0" $ M.fromList [ ("Start0", [ Eps "PStart"
                                                             , Eps "S" ])
                                                , ("PStart", [ Eps "Exp"

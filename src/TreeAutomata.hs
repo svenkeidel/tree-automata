@@ -136,19 +136,17 @@ eqGrammar' (Grammar s1 ps1) (Grammar s2 ps2) = fst (head rs)
   g (l1, Eps n1) (l2, Eps n2) = f n1 n2
   g p1 p2 = throwError $ "Mismatched prods: " ++ show (p1, p2)
 
+-- | Returns the intersection of the two given grammars.
+-- The intersection is taken by taking the cross products of 1)
+-- the non-terminals, 2) the start symbols and 3) the production
+-- rules. Intuitively, this runs both grammars in parallel.
 intersection :: Grammar -> Grammar -> Grammar
-intersection (Grammar s1 p1) (Grammar s2 p2) = Grammar (intersectName s1 s2) (Map.fromList prods) where
+intersection (Grammar s1 p1) (Grammar s2 p2) = normalize $ epsilonClosure $ Grammar (intersectName s1 s2) (Map.fromList prods) where
   intersectName :: Name -> Name -> Name
-  intersectName n1 n2 = Text.concat ["(", n1, ",", n2, ")"]
-  prods = [(intersectName n1 n2,
-            [Ctor c1 (zipWith intersectName x1 x2)
-             | Ctor c1 x1 <- r1,
-               Ctor c2 x2 <- r2,
-               c1 == c2] ++
-            [Eps (intersectName x n2) | Eps x <- r1] ++
-            [Eps (intersectName n1 x) | Eps x <- r2])
-           | (n1, r1) <- Map.toList p1,
-             (n2, r2) <- Map.toList p2]
+  intersectName n1 n2 = Text.concat [n1, "⨯", n2]
+  prods = [(intersectName n1 n2, [Ctor c1 (zipWith intersectName x1 x2) | Ctor c1 x1 <- r1, Ctor c2 x2 <- r2, c1 == c2] ++
+            [Eps (intersectName x n2) | Eps x <- r1] ++ [Eps (intersectName n1 x) | Eps x <- r2])
+           | (n1, r1) <- Map.toList p1, (n2, r2) <- Map.toList p2]
 
 freshInt :: IORef Int
 freshInt = unsafePerformIO (newIORef 0)
@@ -409,9 +407,6 @@ dropUnreachable (Grammar s p) = Grammar s (Map.filterWithKey (\k _ -> Set.member
 -- But we also drop unreachable after droping empty, because the empty may lead to unreachable.
 normalize :: Grammar -> Grammar
 normalize = dropUnreachable . dropEmpty . dropUnreachable
-
-intersectGrammar' :: Grammar -> Grammar -> Grammar
-intersectGrammar' g1 g2 = normalize $ intersection g1 g2
 
 -- | Add productions for all terminals named in the grammar (assumes terminal names start with '"')
 addTerminals :: Grammar -> Grammar
