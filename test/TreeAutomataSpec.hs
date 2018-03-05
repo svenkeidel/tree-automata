@@ -133,6 +133,28 @@ spec = do
       simple == simple' `shouldBe` True
       simple `shouldBe` simple'
 
+  describe "Integration tests" $ do
+    it "union idempotence should hold for simple" $
+      union simple simple `shouldBe` simple
+
+    it "union idempotence should hold for PCF" $
+      union pcf pcf `shouldBe` pcf
+
+    it "intersection of a subset should be that subset" $
+      intersection pcf pcf_sub `shouldBe` pcf_sub
+
+    it "union absorption should hold" $
+      union pcf (intersection pcf simple) `shouldBe` pcf
+
+    it "intersection idempotence should hold for PCF" $
+      intersection pcf pcf `shouldBe` pcf
+
+    it "intersection idempotence should hold for simple" $
+      intersection simple simple `shouldBe` simple
+
+    it "intersection absorption should hold" $
+      intersection pcf (union pcf simple) `shouldBe` pcf
+
   where
     simple = Grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
                                       , ("A", [ Ctor "a" [] ])
