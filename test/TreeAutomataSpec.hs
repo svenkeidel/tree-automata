@@ -16,6 +16,25 @@ main = hspec spec
 spec :: Spec
 spec = do
 
+  describe "Productivity" $ do
+    it "should give all nonterminals for PCF" $
+      map (`isProductive` pcf) ["Exp", "Type", "String", "PStart"] `shouldBe` [True, True, True, True]
+
+    it "should give no nonterminals for infinite" $
+      map (`isProductive` infinite) ["foo", "EStart"] `shouldBe` [False, False]
+
+    it "should give all nonterminals for simple" $
+      map (`isProductive` simple) ["S", "A", "G", "F"] `shouldBe` [True, True, True, True]
+
+    it "should give all nonterminals for simple'" $
+      map (`isProductive` simple') ["S", "A", "G", "H", "F"] `shouldBe` [True, True, True, True, True]
+
+    it "should give all nonterminals for the PCF subset" $
+      map (`isProductive` pcf_sub) ["PSStart", "Exp", "Type"] `shouldBe` [True, True, True]
+
+    it "should give all nonterminals for the union of PCF and simple" $
+      map (`isProductive` pcf_simple) ["Start0", "PStart", "S", "A", "G", "F", "Exp", "Type", "Type"] `shouldBe` [True, True, True, True, True, True, True, True, True]
+
   describe "Union" $ do
     it "should work on the union of two small grammars" $
       let g1 = Grammar "Start1" $ M.fromList [ ("Start1", [ Eps "Exp" ])
@@ -59,6 +78,12 @@ spec = do
                                       , ("G", [ Ctor "g" [ "G" ]
                                               , Ctor "g" [ "A" ]])
                                       , ("F", [ Ctor "f" [ "G", "G" ]])]
+    simple' = Grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
+                                       , ("A", [ Ctor "a" [] ])
+                                       , ("G", [ Ctor "g" [ "G" ]
+                                               , Ctor "g" [ "A" ]])
+                                       , ("H", [ Eps "G" ])
+                                       , ("F", [ Ctor "f" [ "G", "H" ]])]
     infinite = Grammar "EStart" $ M.fromList [ ("EStart", [ Eps "foo" ])
                                              , ("foo", [ Ctor "Bar" ["foo"]])]
     pcf = Grammar "PStart" $ M.fromList [ ("PStart", [ Eps "Exp"

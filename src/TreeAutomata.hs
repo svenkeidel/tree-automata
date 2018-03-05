@@ -11,6 +11,7 @@ module TreeAutomata
   , union
   , intersection
   , sequence
+  , isProductive
   , shrink
   , normalize
   , elimSingles
@@ -104,6 +105,29 @@ sequence label (Grammar start1 prods1) (Grammar start2 prods2) =
                  Map.unionWith (++) prods1 prods2)
   where
     start = uniqueStart
+
+-- | Tests whether the given nonterminal is productive in the given
+-- grammar.
+isProductive :: Name -> Grammar -> Bool
+isProductive n g = Set.member n $ productive g
+
+-- | Returns all productive nonterminals in the given grammar.
+productive :: Grammar -> Set.Set Name
+productive (Grammar _ prods) = execState (go prods) p
+  where
+    p = Set.fromList [ n | (n, rhss) <- Map.toList prods, producesConstant rhss]
+    producesConstant :: [Rhs] -> Bool
+    producesConstant = isJust . find (\r -> case r of Ctor _ [] -> True; _ -> False)
+    filter :: [Rhs] -> Set.Set Name -> Bool
+    filter rhss p = case rhss of
+      (Ctor _ args : rhss) -> if and (map (`Set.member` p) args) then True else filter rhss p
+      (Eps nonterm : rhss) -> if Set.member nonterm p then True else filter rhss p
+      [] -> False
+    go :: Map.Map Name [Rhs] -> State (Set.Set Name) ()
+    go prods = do p <- get
+                  let p' = Set.union p $ Set.fromList [ n | (n, rhss) <- Map.toList prods, filter rhss p ]
+                  put p'
+                  if p == p' then return () else go prods
 
 -- | Test the equality of two regular tree grammars
 eqGrammar :: Grammar -> Grammar -> Either String ()
