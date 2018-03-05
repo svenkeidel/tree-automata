@@ -63,7 +63,7 @@ instance Show Grammar where
       g lhs (Eps n) = Text.unpack lhs ++ " → " ++ Text.unpack n
 
 instance Eq Grammar where
-  g1 == g2 = isRight $ eqGrammar g1 g2
+  g1 == g2 = g1 `subsetOf` g2 && g2 `subsetOf` g1
 
 -- TODO: Naming context in grammar
 instance NFData Grammar where
@@ -181,6 +181,7 @@ productive (Grammar _ prods) = execState (go prods) p
                   put p'
                   if p == p' then return () else go prods
 
+{-
 -- | Test the equality of two regular tree grammars
 eqGrammar :: Grammar -> Grammar -> Either String ()
 eqGrammar g1 g2 = eqGrammar' (epsilonClosure g1) (epsilonClosure g2)
@@ -211,6 +212,7 @@ eqGrammar' (Grammar s1 ps1) (Grammar s2 ps2) = fst (head rs)
       | otherwise = zipWithM_ f p1 p2
   g (l1, Eps n1) (l2, Eps n2) = f n1 n2
   g p1 p2 = throwError $ "Mismatched prods: " ++ show (p1, p2)
+-}
 
 -- | Returns the intersection of the two given grammars.
 -- The intersection is taken by taking the cross products of 1)

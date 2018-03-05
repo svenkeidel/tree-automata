@@ -120,6 +120,19 @@ spec = do
       simple `subsetOf` pcf `shouldBe` False
       pcf `subsetOf` simple `shouldBe` False
 
+  describe "Equality" $ do
+    it "should be true when comparing the same grammar" $ do
+      pcf == pcf `shouldBe` True
+      pcf `shouldBe` pcf
+
+    it "should be false when comparing different grammars" $ do
+      pcf == simple `shouldBe` False
+      pcf `shouldNotBe` simple
+
+    it "should be true when comparing different grammars producing the same language" $ do
+      simple == simple' `shouldBe` True
+      simple `shouldBe` simple'
+
   where
     simple = Grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
                                       , ("A", [ Ctor "a" [] ])
