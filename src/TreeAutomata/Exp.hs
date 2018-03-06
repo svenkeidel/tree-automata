@@ -12,8 +12,7 @@ import qualified Data.Text as Text
 
 import           System.IO.Unsafe (unsafePerformIO)
 
-import           TreeAutomata hiding (sequence)
-import qualified TreeAutomata
+import           TreeAutomata
 import           Util (diagonalize')
 
 import           TextShow
@@ -44,8 +43,7 @@ expToTA ctxt = go where
   go Wild = wildcard ctxt wildStart 
   go (Neg e) = shrink $ dedup $ negateTA ctxt (shrink (dedup (go e)))
   go (And e1 e2) = error "expToTA.And: unimplemented"
-  go (Or label e1 e2) = union start (go e1) (go e2)
-    where start = newU (Text.concat ["Or(", showt label, ")"])
+  go (Or label e1 e2) = go e1 `union` go e2
   go (Cons c es) =
     if length es /= expected
     then error ("expToTA.Cons: "++show c++"("++show expected++"):" ++ show es)
@@ -58,8 +56,7 @@ expToTA ctxt = go where
     tas = map go es
   go (Hole nt) = Grammar start (Map.fromList [(start, [Eps nt])]) where
     start = newU (Text.concat ["Hole(", showt nt, ")"])
-  go (Seq label e1 e2) = TreeAutomata.sequence start label (go e1) (go e2) where
-    start = newU (Text.concat ["Seq(", showt label, ")"])
+  go (Seq label e1 e2) = TreeAutomata.sequence label (go e1) (go e2)
   go (Star label e1) = Grammar start (Map.insert start [Eps label] $
                                  Map.insert label [Eps start1] prods1) where
     start = newU (Text.concat ["Star(", showt label, ")"])
@@ -100,7 +97,7 @@ negateTA ctxt (Grammar start prods) = evalState m Map.empty where
     done <- gets (Map.member name)
     unless done $ do
       modify (Map.insert name [])
-      newProds <- sequence [
+      newProds <- Prelude.sequence [
         Ctor c <$> mapM go newProd
         | (c, i) <- Map.toList ctxt
         , newProd <- quux i (prodsForCtor i nts c) ]
@@ -125,7 +122,7 @@ negateTA ctxt (Grammar start prods) = evalState m Map.empty where
 quux :: Int -> [[NonTerm]] -> [[[NonTerm]]]
 quux i prods = r where
   prods' :: [[(Int, NonTerm)]]
-  prods' = sequence $ map (filter (not . isWild . snd)  . zip [0..]) prods
+  prods' = Prelude.sequence $ map (filter (not . isWild . snd)  . zip [0..]) prods
   r = map (reconstruct i) prods'
 
 reconstruct :: Int -> [(Int, NonTerm)] -> [[NonTerm]]
