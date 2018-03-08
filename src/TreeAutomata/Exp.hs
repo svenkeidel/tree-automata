@@ -39,7 +39,7 @@ data Exp
 -- NOTE: start must not be hoisted up, otherwise the unsafeperformIO wont work
 expToTA :: CtorInfo -> Exp -> Grammar
 expToTA ctxt = go where
-  go Empty = empty emptyStart
+  go Empty = empty
   go Wild = wildcard ctxt
   go (Neg e) = shrink $ dedup $ negateTA ctxt (shrink (dedup (go e)))
   go (And e1 e2) = error "expToTA.And: unimplemented"
@@ -239,10 +239,6 @@ newUnique s = do
   r <- atomicModifyIORef' uniqSource $ \x -> let z = x+1 in (z,z)
   return $ Text.concat ["uniq:", showt r, ":", s]
 {-# NOINLINE newUnique #-}
-
-emptyStart :: Text
-emptyStart = unsafePerformIO (newUnique "Empty")
-{-# NOINLINE emptyStart #-}
 
 (+++) :: Map.Map Name [Rhs] -> Map.Map Name [Rhs] -> Map.Map Name [Rhs]
 p1 +++ p2 = Map.unionWith f p1 p2 where

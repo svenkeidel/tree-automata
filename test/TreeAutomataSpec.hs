@@ -37,7 +37,7 @@ spec = do
 
   describe "Emptiness" $ do
     it "should be true on the empty grammar" $
-      isEmpty (TreeAutomata.empty "Start") `shouldBe` True
+      isEmpty TreeAutomata.empty `shouldBe` True
 
     it "should be true on the infinite infinite grammar" $
       isEmpty infinite `shouldBe` True

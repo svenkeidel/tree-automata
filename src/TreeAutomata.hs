@@ -83,8 +83,9 @@ instance Hashable Rhs where
   hashWithSalt s (Eps name) = s `hashWithSalt` (1::Int) `hashWithSalt` name
 
 -- | Empty regular tree grammar
-empty :: Name -> Grammar
-empty start = Grammar start (Map.fromList [(start, [])])
+empty :: Grammar
+empty = Grammar start (Map.fromList [(start, [])]) where
+  start = uniqueStart
 
 -- | Creates a grammar with all possible terms over a given signature
 wildcard :: CtorInfo -> Grammar
