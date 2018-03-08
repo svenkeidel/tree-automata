@@ -10,6 +10,7 @@ module TreeAutomata
   , wildcard
   , union
   , intersection
+  , uniqueStart
   , sequence
   , subsetOf
   , isEmpty
