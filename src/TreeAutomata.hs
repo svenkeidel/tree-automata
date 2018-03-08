@@ -87,8 +87,9 @@ empty :: Name -> Grammar
 empty start = Grammar start (Map.fromList [(start, [])])
 
 -- | Creates a grammar with all possible terms over a given signature
-wildcard :: CtorInfo -> Name -> Grammar
-wildcard ctxt start = Grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, i) <- Map.toList ctxt])])
+wildcard :: CtorInfo -> Grammar
+wildcard ctxt = Grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, i) <- Map.toList ctxt])]) where
+  start = uniqueStart
 
 -- | Union of two grammars. A new, unique start symbol is automatically created.
 -- If either of the grammars is empty, the other is returned as-is.

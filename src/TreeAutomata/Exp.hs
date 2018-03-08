@@ -40,7 +40,7 @@ data Exp
 expToTA :: CtorInfo -> Exp -> Grammar
 expToTA ctxt = go where
   go Empty = empty emptyStart
-  go Wild = wildcard ctxt wildStart 
+  go Wild = wildcard ctxt
   go (Neg e) = shrink $ dedup $ negateTA ctxt (shrink (dedup (go e)))
   go (And e1 e2) = error "expToTA.And: unimplemented"
   go (Or label e1 e2) = go e1 `union` go e2
@@ -243,10 +243,6 @@ newUnique s = do
 emptyStart :: Text
 emptyStart = unsafePerformIO (newUnique "Empty")
 {-# NOINLINE emptyStart #-}
-
-wildStart :: Text
-wildStart = unsafePerformIO (newUnique "Wild")
-{-# NOINLINE wildStart #-}
 
 (+++) :: Map.Map Name [Rhs] -> Map.Map Name [Rhs] -> Map.Map Name [Rhs]
 p1 +++ p2 = Map.unionWith f p1 p2 where
