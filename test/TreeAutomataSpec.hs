@@ -42,6 +42,10 @@ spec = do
     it "should be defined on an infinite grammar" $
       height infinite `shouldBe` 2
 
+  describe "Unique names" $ do
+    it "should always produce a unique start symbol" $
+      [ uniqueStart (), uniqueStart (), uniqueStart ()] `shouldBe` ["Start1","Start2","Start3"]
+
   describe "Productivity" $ do
     it "should give all nonterminals for PCF" $
       map (`isProductive` pcf) ["Exp", "Type", "String", "PStart"] `shouldBe` [True, True, True, True]
@@ -59,7 +63,7 @@ spec = do
       map (`isProductive` pcf_sub) ["PSStart", "Exp", "Type"] `shouldBe` [True, True, True]
 
     it "should give all nonterminals for the union of PCF and simple" $
-      map (`isProductive` pcf_simple) ["Start0", "PStart", "S", "A", "G", "F", "Exp", "Type", "Type"] `shouldBe` [True, True, True, True, True, True, True, True, True]
+      map (`isProductive` pcf_simple) ["Start5", "PStart", "S", "A", "G", "F", "Exp", "Type", "Type"] `shouldBe` [True, True, True, True, True, True, True, True, True]
 
     it "should correctly compute that PCF produces Zero, Num and String" $
       map (produces pcf) ["Zero", "Num", "String", "Succ", "Pred", "Ifz"] `shouldBe` [True, True, True, False, False, False]
@@ -89,7 +93,7 @@ spec = do
                                              , ("Exp", [ Ctor "Zero" [] ])]
           g2 = grammar "Start2" $ M.fromList [ ("Start2", [ Eps "Type" ])
                                              , ("Type", [ Ctor "Num" [] ])]
-          g3 = grammar "Start0" $ M.fromList [ ("Start0", [ Eps "Start1", Eps "Start2" ])
+          g3 = grammar "Start4" $ M.fromList [ ("Start4", [ Eps "Start1", Eps "Start2" ])
                                              , ("Start1", [ Eps "Exp" ])
                                              , ("Start2", [ Eps "Type" ])
                                              , ("Exp", [ Ctor "Zero" [] ])
@@ -251,7 +255,7 @@ spec = do
                                                        , Ctor "Zero" []])
                                              , ("Type", [ Ctor "Num" []
                                                         , Ctor "Fun" ["Type", "Type"]])]
-    pcf_simple = grammar "Start0" $ M.fromList [ ("Start0", [ Eps "PStart"
+    pcf_simple = grammar "Start5" $ M.fromList [ ("Start5", [ Eps "PStart"
                                                             , Eps "S" ])
                                                , ("PStart", [ Eps "Exp"
                                                             , Eps "Type" ])

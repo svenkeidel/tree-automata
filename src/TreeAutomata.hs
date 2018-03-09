@@ -96,13 +96,13 @@ instance Hashable Rhs where
 -- | Empty regular tree grammar
 empty :: Grammar
 empty = Grammar start (Map.fromList [(start, [])]) where
-  start = uniqueStart
+  start = uniqueStart ()
 
 -- | Creates a grammar with a single production from the start symbol
 -- to the given constant.
 singleton :: Name -> Grammar
 singleton c = Grammar start (Map.fromList [(start, [ Ctor c [] ])]) where
-  start = uniqueStart
+  start = uniqueStart ()
 
 -- | Create a grammar with the given start symbol and production rules
 grammar :: Name -> Map.Map Name [Rhs] -> Grammar
@@ -112,14 +112,14 @@ grammar = Grammar
 -- into a single new grammar containing this constructor.
 combine :: Name -> [Grammar] -> Grammar
 combine n gs = Grammar s $ Map.insertWith (++) s [ Ctor n ss ] ps where
-  s = uniqueStart
+  s = uniqueStart ()
   ss = map start gs
   (Grammar _ ps) = union' gs
 
 -- | Creates a grammar with all possible terms over a given signature
 wildcard :: Alphabet -> Grammar
 wildcard ctxt = Grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, i) <- Map.toList ctxt])]) where
-  start = uniqueStart
+  start = uniqueStart ()
 
 -- | Union of two grammars. A new, unique start symbol is automatically created.
 -- If either of the grammars is empty, the other is returned as-is.
@@ -130,7 +130,7 @@ union g1 g2 | isEmpty g1 = g2
   where
     (Grammar start1 prods1) = g1
     (Grammar start2 prods2) = g2
-    start = uniqueStart
+    start = uniqueStart ()
     prods = Map.insert start (nub [Eps start1, Eps start2]) $ Map.unionWith (\r1 r2 -> nub $ r1 ++ r2) prods1 prods2
 
 -- | Union of a list of grammars. This simply iterates over the list,
@@ -147,7 +147,7 @@ sequence label (Grammar start1 prods1) (Grammar start2 prods2) =
                  Map.insertWith (++) label [Eps start2] $
                  Map.unionWith (++) prods1 prods2)
   where
-    start = uniqueStart
+    start = uniqueStart ()
 
 data Constraint = Constraint (Name, Name) | Trivial Bool deriving (Show)
 type ConstraintSet = Map.Map (Name,Name) [[Constraint]]
@@ -306,15 +306,15 @@ freshInt :: IORef Int
 freshInt = unsafePerformIO (newIORef 0)
 {-# NOINLINE freshInt #-}
 
-fresh :: Int
-fresh = unsafePerformIO $ do
+fresh :: () -> Int
+fresh _ = unsafePerformIO $ do
   x <- readIORef freshInt
   writeIORef freshInt (x+1)
   return x
 {-# NOINLINE fresh #-}
 
-uniqueStart :: Text
-uniqueStart = Text.append "Start" $ Text.pack $ show fresh
+uniqueStart :: () -> Text
+uniqueStart _ = Text.pack $ "Start" ++ show (fresh ())
 
 -- | List the names that occur in a Rhs.
 rhsNames :: Rhs -> [Name]
