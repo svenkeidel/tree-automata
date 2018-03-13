@@ -104,6 +104,7 @@ union g1 g2 | isEmpty g1 = g2
     start = uniqueStart
     prods = Map.insert start (nub [Eps start1, Eps start2]) $ Map.unionWith (\r1 r2 -> nub $ r1 ++ r2) prods1 prods2
 
+-- | Creates a grammar that produces the sequence of its two arguments.
 sequence :: Name -> Grammar -> Grammar -> Grammar
 sequence label (Grammar start1 prods1) (Grammar start2 prods2) =
   Grammar start (Map.insert start [Eps start1] $
