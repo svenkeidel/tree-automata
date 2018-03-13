@@ -120,7 +120,15 @@ spec = do
       simple `subsetOf` pcf `shouldBe` False
       pcf `subsetOf` simple `shouldBe` False
 
+    it "should hold for equal grammars" $ do
+      pcf `subsetOf` pcf `shouldBe` True
+      empty `subsetOf` empty `shouldBe` True
+
   describe "Equality" $ do
+    it "should be true when comparing the empty grammar" $ do
+      empty == empty `shouldBe` True
+      empty `shouldBe` empty
+
     it "should be true when comparing the same grammar" $ do
       pcf == pcf `shouldBe` True
       pcf `shouldBe` pcf

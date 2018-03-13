@@ -125,7 +125,7 @@ g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) wh
   solve :: (Name, Name) -> ConstraintSet -> Bool
   solve pair constraints = case Map.lookup pair constraints of
     Just deps -> and (map or (map (map (\c -> case c of Trivial t -> t; Constraint p -> solve p constraints)) deps))
-    Nothing -> False
+    Nothing -> True
   generate :: ConstraintSet -> Set.Set (Name,Name) -> ConstraintSet
   generate constraints toTest | Set.null toTest = constraints
                               | otherwise = do
