@@ -141,7 +141,7 @@ g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) wh
                                   let toTest'' = Set.union toTest' (Set.fromList [ (a1,a2) | pairs <- dependencies, Constraint (a1,a2) <- pairs, not $ elem (a1,a2) (Map.keys constraints') ])
                                   generate constraints' toTest''
   shareCtor :: Name -> Name -> [[Constraint]]
-  shareCtor a1 a2 = [ [ r | r2 <- fromJust $ Map.lookup a2 p2, r <- match r1 r2 ] | r1 <- fromJust $ Map.lookup a1 p1 ]
+  shareCtor a1 a2 = [ [ r | r2s <- maybeToList $ Map.lookup a2 p2, r2 <- r2s, r <- match r1 r2 ] | r1s <- maybeToList $ Map.lookup a1 p1, r1 <- r1s ]
   match :: Rhs -> Rhs -> [Constraint]
   match r1 r2 = case (r1, r2) of
     (Ctor c args, Ctor c' args') | c == c' && length args == length args' -> if length args > 0 then zipWith (\a1 a2 -> Constraint (a1,a2)) args args' else [Trivial True]
