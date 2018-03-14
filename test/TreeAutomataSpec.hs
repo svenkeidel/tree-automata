@@ -16,6 +16,32 @@ main = hspec spec
 spec :: Spec
 spec = do
 
+  describe "Size" $ do
+    it "should be 25 on PCF" $
+      size pcf `shouldBe` 25
+
+    it "should be 10 on simple" $
+      size simple `shouldBe` 10
+
+    it "should be 0 on the empty grammar" $
+      size empty `shouldBe` 0
+
+    it "should be defined on an infinite grammar" $
+      size infinite `shouldBe` 4
+
+  describe "Height" $ do
+    it "should be 11 on PCF" $
+      height pcf `shouldBe` 11
+
+    it "should be 5 on simple" $
+      height simple `shouldBe` 5
+
+    it "should be 0 on the empty grammar" $
+      height empty `shouldBe` 0
+
+    it "should be defined on an infinite grammar" $
+      height infinite `shouldBe` 2
+
   describe "Productivity" $ do
     it "should give all nonterminals for PCF" $
       map (`isProductive` pcf) ["Exp", "Type", "String", "PStart"] `shouldBe` [True, True, True, True]

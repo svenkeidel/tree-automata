@@ -16,6 +16,8 @@ module TreeAutomata
   , isEmpty
   , isProductive
   , removeUnproductive
+  , size
+  , height
   , shrink
   , normalize
   , elimSingles
@@ -184,6 +186,18 @@ productive (Grammar _ prods) = execState (go prods) p
                   let p' = Set.union p $ Set.fromList [ n | (n, rhss) <- Map.toList prods, filter rhss p ]
                   put p'
                   if p == p' then return () else go prods
+
+-- | The size of a regular tree grammar is defined as SUM_(A∈N)(SUM_(A→α) |Aα|).
+size :: Grammar -> Int
+size (Grammar _ ps) = Map.foldr (\rhss acc -> foldr (\rhs acc -> 1 + sizeRhs rhs acc) acc rhss) 0 ps
+
+sizeRhs :: Rhs -> Int -> Int
+sizeRhs (Ctor _ args) acc = acc + length args
+sizeRhs (Eps _) acc = acc + 1
+
+-- | The height of a regular tree grammar is defined as the number of production rules.
+height :: Grammar -> Int
+height (Grammar _ ps) = Map.foldr (\rhss acc -> acc + length rhss) 0 ps
 
 {-
 -- | Test the equality of two regular tree grammars
