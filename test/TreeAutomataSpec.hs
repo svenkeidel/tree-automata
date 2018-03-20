@@ -93,6 +93,18 @@ spec = do
     it "should work on the union of the simple and PCF grammars" $
       union pcf simple `shouldBeLiteral` pcf_simple
 
+    it "the list version should work on an empty list" $
+      union' [] `shouldBeLiteral` empty
+
+    it "the list version should work on a singleton list" $
+      union' [simple] `shouldBeLiteral` (union simple empty)
+
+    it "the list version should work on a list with two elements" $
+      union' [simple, pcf] `shouldBeLiteral` (union simple (union pcf empty))
+
+    it "the list version should work on a list with three elements" $
+      union' [simple, pcf, infinite] `shouldBeLiteral` (union simple (union pcf (union infinite empty)))
+
   describe "Intersection" $ do
     it "of a subset of the PCF grammar should be that subset" $
       intersection pcf pcf_sub `shouldBeLiteral` (Grammar "PStart⨯PSStart" $

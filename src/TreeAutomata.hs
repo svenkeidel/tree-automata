@@ -9,6 +9,7 @@ module TreeAutomata
   , empty
   , wildcard
   , union
+  , union'
   , intersection
   , uniqueStart
   , sequence
@@ -105,6 +106,13 @@ union g1 g2 | isEmpty g1 = g2
     (Grammar start2 prods2) = g2
     start = uniqueStart
     prods = Map.insert start (nub [Eps start1, Eps start2]) $ Map.unionWith (\r1 r2 -> nub $ r1 ++ r2) prods1 prods2
+
+-- | Union of a list of grammars. This simply iterates over the list,
+-- using `union` on each pair and `empty` for the base case.
+union' :: [Grammar] -> Grammar
+union' gs = case gs of
+  (x:xs) -> union x (union' xs)
+  [] -> empty
 
 -- | Creates a grammar that produces the sequence of its two arguments.
 sequence :: Name -> Grammar -> Grammar -> Grammar
