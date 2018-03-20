@@ -162,6 +162,18 @@ spec = do
       pcf `subsetOf` pcf `shouldBe` True
       empty `subsetOf` empty `shouldBe` True
 
+  describe "Permutation" $ do
+    it "should work on the empty grammar" $
+      permutate empty `shouldBe` [ Grammar "Start0" M.empty ]
+
+    it "should work on the infinite grammar" $ do
+      let (Grammar _ ps) = infinite
+      permutate infinite `shouldBe` [ infinite, (Grammar "foo" ps) ]
+
+    it "should work on the simple grammar" $ do
+      let (Grammar _ ps) = simple
+      permutate simple `shouldBe` [ (Grammar "A" ps), (Grammar "F" ps), (Grammar "G" ps), simple ]
+
   describe "Equality" $ do
     it "should be true when comparing the empty grammar" $ do
       empty == empty `shouldBe` True

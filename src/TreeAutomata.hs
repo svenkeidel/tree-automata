@@ -11,6 +11,7 @@ module TreeAutomata
   , union
   , union'
   , intersection
+  , permutate
   , uniqueStart
   , sequence
   , subsetOf
@@ -251,6 +252,11 @@ intersection (Grammar s1 p1) (Grammar s2 p2) = normalize $ epsilonClosure $ Gram
   prods = [(intersectName n1 n2, [Ctor c1 (zipWith intersectName x1 x2) | Ctor c1 x1 <- r1, Ctor c2 x2 <- r2, c1 == c2] ++
             [Eps (intersectName x n2) | Eps x <- r1] ++ [Eps (intersectName n1 x) | Eps x <- r2])
            | (n1, r1) <- Map.toList p1, (n2, r2) <- Map.toList p2]
+
+-- | Returns a list of grammars, where each grammar has a non-terminal
+-- symbol from the given grammar as start symbol.
+permutate :: Grammar -> [Grammar]
+permutate (Grammar _ ps) = map (\n -> (Grammar n ps)) (Map.keys ps)
 
 freshInt :: IORef Int
 freshInt = unsafePerformIO (newIORef 0)
