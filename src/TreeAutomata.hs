@@ -2,7 +2,6 @@
 module TreeAutomata
   ( Grammar
   , Rhs (..)
-  , Ctor
   , Name
   , Alphabet
   , Arity
