@@ -14,6 +14,7 @@ module TreeAutomata
   , permutate
   , start
   , productions
+  , rhs
   , uniqueStart
   , sequence
   , subsetOf
@@ -272,6 +273,11 @@ start (Grammar s _) = s
 -- | Returns the productions of the given grammar.
 productions :: Grammar -> Map.Map Name [Rhs]
 productions (Grammar _ ps) = ps
+
+-- | Returns the right hand sides of the given non-terminal symbol in
+-- the given grammar.
+rhs :: Grammar -> Name -> [Rhs]
+rhs (Grammar _ ps) n = fromMaybe [] $ Map.lookup n ps
 
 freshInt :: IORef Int
 freshInt = unsafePerformIO (newIORef 0)
