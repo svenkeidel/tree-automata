@@ -6,6 +6,7 @@ module TreeAutomata
   , Alphabet
   , Arity
   , empty
+  , singleton
   , grammar
   , wildcard
   , union
@@ -93,6 +94,12 @@ instance Hashable Rhs where
 -- | Empty regular tree grammar
 empty :: Grammar
 empty = Grammar start (Map.fromList [(start, [])]) where
+  start = uniqueStart
+
+-- | Creates a grammar with a single production from the start symbol
+-- to the given constant.
+singleton :: Name -> Grammar
+singleton c = Grammar start (Map.fromList [(start, [ Ctor c [] ])]) where
   start = uniqueStart
 
 -- | Create a grammar with the given start symbol and production rules
