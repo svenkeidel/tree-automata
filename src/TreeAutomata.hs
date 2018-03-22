@@ -8,6 +8,7 @@ module TreeAutomata
   , empty
   , singleton
   , grammar
+  , combine
   , wildcard
   , union
   , union'
@@ -106,6 +107,14 @@ singleton c = Grammar start (Map.fromList [(start, [ Ctor c [] ])]) where
 -- | Create a grammar with the given start symbol and production rules
 grammar :: Name -> Map.Map Name [Rhs] -> Grammar
 grammar = Grammar
+
+-- | Given a non-terminal symbol with n arguments, combines n grammars
+-- into a single new grammar containing this constructor.
+combine :: Name -> [Grammar] -> Grammar
+combine n gs = Grammar s $ Map.insertWith (++) s [ Ctor n ss ] ps where
+  s = uniqueStart
+  ss = map start gs
+  (Grammar _ ps) = union' gs
 
 -- | Creates a grammar with all possible terms over a given signature
 wildcard :: Alphabet -> Grammar
