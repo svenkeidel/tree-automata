@@ -79,11 +79,11 @@ spec = do
 
   describe "Union" $ do
     it "should work on the union of two small grammars" $
-      let g1 = Grammar "Start1" $ M.fromList [ ("Start1", [ Eps "Exp" ])
+      let g1 = grammar "Start1" $ M.fromList [ ("Start1", [ Eps "Exp" ])
                                              , ("Exp", [ Ctor "Zero" [] ])]
-          g2 = Grammar "Start2" $ M.fromList [ ("Start2", [ Eps "Type" ])
+          g2 = grammar "Start2" $ M.fromList [ ("Start2", [ Eps "Type" ])
                                              , ("Type", [ Ctor "Num" [] ])]
-          g3 = Grammar "Start0" $ M.fromList [ ("Start0", [ Eps "Start1", Eps "Start2" ])
+          g3 = grammar "Start0" $ M.fromList [ ("Start0", [ Eps "Start1", Eps "Start2" ])
                                              , ("Start1", [ Eps "Exp" ])
                                              , ("Start2", [ Eps "Type" ])
                                              , ("Exp", [ Ctor "Zero" [] ])
@@ -107,7 +107,7 @@ spec = do
 
   describe "Intersection" $ do
     it "of a subset of the PCF grammar should be that subset" $
-      intersection pcf pcf_sub `shouldBeLiteral` (Grammar "PStart⨯PSStart" $
+      intersection pcf pcf_sub `shouldBeLiteral` (grammar "PStart⨯PSStart" $
                                                   M.fromList [ ("Exp⨯Exp", [ Ctor "Zero" []
                                                                            , Ctor "Succ" ["Exp⨯Exp"]
                                                                            , Ctor "Pred" ["Exp⨯Exp"]])
@@ -120,21 +120,21 @@ spec = do
                                                                              , Ctor "Fun" [ "Type⨯Type", "Type⨯Type" ]])])
 
     it "should give an empty grammar if the arguments have no intersection" $ do
-      intersection simple pcf `shouldBeLiteral` (Grammar "S⨯PStart" M.empty)
+      intersection simple pcf `shouldBeLiteral` (grammar "S⨯PStart" M.empty)
 
     it "should give an empty grammar when one of the arguments is an empty grammar" $ do
-      intersection simple infinite `shouldBeLiteral` (Grammar "S⨯EStart" M.empty)
-      intersection infinite simple `shouldBeLiteral` (Grammar "EStart⨯S" M.empty)
+      intersection simple infinite `shouldBeLiteral` (grammar "S⨯EStart" M.empty)
+      intersection infinite simple `shouldBeLiteral` (grammar "EStart⨯S" M.empty)
 
   describe "Inclusion" $ do
     it "should work for the worked out example" $
-      let g = Grammar "S" $ M.fromList [("S", [ Ctor "f" ["A"]
+      let g = grammar "S" $ M.fromList [("S", [ Ctor "f" ["A"]
                                               , Ctor "c" []
                                               , Ctor "f" ["B"]])
                                        ,("A", [ Ctor "g" ["S"]
                                               , Ctor "e" []])
                                        ,("B", [ Ctor "b" []])]
-          g' = Grammar "S'" $ M.fromList [("S'", [ Ctor "f" ["A'"]
+          g' = grammar "S'" $ M.fromList [("S'", [ Ctor "f" ["A'"]
                                                  , Ctor "c" []
                                                  , Ctor "f" ["B'"]])
                                          ,("A'", [ Ctor "g" ["S'"]
@@ -164,15 +164,15 @@ spec = do
 
   describe "Permutation" $ do
     it "should work on the empty grammar" $
-      permutate empty `shouldBe` [ Grammar "Start0" M.empty ]
+      permutate empty `shouldBe` [ grammar "Start0" M.empty ]
 
     it "should work on the infinite grammar" $ do
-      let (Grammar _ ps) = infinite
-      permutate infinite `shouldBe` [ infinite, (Grammar "foo" ps) ]
+      let ps = productions infinite
+      permutate infinite `shouldBe` [ infinite, (grammar "foo" ps) ]
 
     it "should work on the simple grammar" $ do
-      let (Grammar _ ps) = simple
-      permutate simple `shouldBe` [ (Grammar "A" ps), (Grammar "F" ps), (Grammar "G" ps), simple ]
+      let ps = productions simple
+      permutate simple `shouldBe` [ (grammar "A" ps), (grammar "F" ps), (grammar "G" ps), simple ]
 
   describe "Equality" $ do
     it "should be true when comparing the empty grammar" $ do
@@ -214,20 +214,20 @@ spec = do
       intersection pcf (union pcf simple) `shouldBe` pcf
 
   where
-    simple = Grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
+    simple = grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
                                       , ("A", [ Ctor "a" [] ])
                                       , ("G", [ Ctor "g" [ "G" ]
                                               , Ctor "g" [ "A" ]])
                                       , ("F", [ Ctor "f" [ "G", "G" ]])]
-    simple' = Grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
+    simple' = grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
                                        , ("A", [ Ctor "a" [] ])
                                        , ("G", [ Ctor "g" [ "G" ]
                                                , Ctor "g" [ "A" ]])
                                        , ("H", [ Eps "G" ])
                                        , ("F", [ Ctor "f" [ "G", "H" ]])]
-    infinite = Grammar "EStart" $ M.fromList [ ("EStart", [ Eps "foo" ])
+    infinite = grammar "EStart" $ M.fromList [ ("EStart", [ Eps "foo" ])
                                              , ("foo", [ Ctor "Bar" ["foo"]])]
-    pcf = Grammar "PStart" $ M.fromList [ ("PStart", [ Eps "Exp"
+    pcf = grammar "PStart" $ M.fromList [ ("PStart", [ Eps "Exp"
                                                      , Eps "Type" ])
                                         , ("Exp", [ Ctor "App" ["Exp", "Exp"]
                                                   , Ctor "Abs" ["String", "Type", "Exp"]
@@ -238,14 +238,14 @@ spec = do
                                         , ("Type", [ Ctor "Num" []
                                                    , Ctor "Fun" ["Type", "Type"]])
                                         , ("String", [ Ctor "String" [] ])]
-    pcf_sub = Grammar "PSStart" $ M.fromList [ ("PSStart", [ Eps "Exp"
+    pcf_sub = grammar "PSStart" $ M.fromList [ ("PSStart", [ Eps "Exp"
                                                            , Eps "Type" ])
                                              , ("Exp", [ Ctor "Succ" [ "Exp" ]
                                                        , Ctor "Pred" [ "Exp" ]
                                                        , Ctor "Zero" []])
                                              , ("Type", [ Ctor "Num" []
                                                         , Ctor "Fun" ["Type", "Type"]])]
-    pcf_simple = Grammar "Start0" $ M.fromList [ ("Start0", [ Eps "PStart"
+    pcf_simple = grammar "Start0" $ M.fromList [ ("Start0", [ Eps "PStart"
                                                             , Eps "S" ])
                                                , ("PStart", [ Eps "Exp"
                                                             , Eps "Type" ])
@@ -274,11 +274,8 @@ spec = do
     -- simply comparing grammars using `==`, because we now also
     -- detect spurious non-terminal symbols and production rules.
     shouldBeLiteral :: Grammar -> Grammar -> Expectation
-    actual `shouldBeLiteral` expected = let
-      (Grammar start1 prods1) = actual
-      (Grammar start2 prods2) = expected
-      in
+    actual `shouldBeLiteral` expected =
       -- TODO: apparently the order of the right hand sides in the maps matters. For now, just make the right order in the test cases,
       -- but eventually we should implement a custom equality check that does not depend on order.
-        unless (start1 == start2 && prods1 == prods2)
+        unless (start actual == start expected && productions actual == productions expected)
           (assertFailure $ "Grammars are not literally equal.\nExpected:\n\n" ++ show expected ++ "\nbut got:\n\n" ++ show actual)

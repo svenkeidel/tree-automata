@@ -1,17 +1,20 @@
 {-# LANGUAGE TupleSections, FlexibleContexts, OverloadedStrings #-}
 module TreeAutomata
-  ( Grammar(..)
+  ( Grammar
   , Rhs (..)
   , Ctor
   , Name
   , Alphabet
   , Arity
   , empty
+  , grammar
   , wildcard
   , union
   , union'
   , intersection
   , permutate
+  , start
+  , productions
   , uniqueStart
   , sequence
   , subsetOf
@@ -91,6 +94,10 @@ instance Hashable Rhs where
 empty :: Grammar
 empty = Grammar start (Map.fromList [(start, [])]) where
   start = uniqueStart
+
+-- | Create a grammar with the given start symbol and production rules
+grammar :: Name -> Map.Map Name [Rhs] -> Grammar
+grammar = Grammar
 
 -- | Creates a grammar with all possible terms over a given signature
 wildcard :: Alphabet -> Grammar
@@ -258,6 +265,14 @@ intersection (Grammar s1 p1) (Grammar s2 p2) = normalize $ epsilonClosure $ Gram
 -- symbol from the given grammar as start symbol.
 permutate :: Grammar -> [Grammar]
 permutate (Grammar _ ps) = map (\n -> (Grammar n ps)) (Map.keys ps)
+
+-- | Returns the start symbol of the given grammar.
+start :: Grammar -> Name
+start (Grammar s _) = s
+
+-- | Returns the productions of the given grammar.
+productions :: Grammar -> Map.Map Name [Rhs]
+productions (Grammar _ ps) = ps
 
 freshInt :: IORef Int
 freshInt = unsafePerformIO (newIORef 0)
