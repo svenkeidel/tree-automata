@@ -15,6 +15,7 @@ module TreeAutomata
   , permutate
   , start
   , productions
+  , produces
   , rhs
   , uniqueStart
   , sequence
@@ -280,6 +281,12 @@ start (Grammar s _) = s
 -- | Returns the productions of the given grammar.
 productions :: Grammar -> Map.Map Name [Rhs]
 productions (Grammar _ ps) = ps
+
+-- | Returns true iff the grammar can construct the given constant.
+produces :: Grammar -> Name -> Bool
+produces (Grammar s prods) n = any (elem n) ctors where
+  ps = productive (Grammar s prods)
+  ctors = Set.map (\p -> [ c | Ctor c [] <- fromJust $ Map.lookup p prods]) ps
 
 -- | Returns the right hand sides of the given non-terminal symbol in
 -- the given grammar.

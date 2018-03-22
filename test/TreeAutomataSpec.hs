@@ -61,6 +61,12 @@ spec = do
     it "should give all nonterminals for the union of PCF and simple" $
       map (`isProductive` pcf_simple) ["Start0", "PStart", "S", "A", "G", "F", "Exp", "Type", "Type"] `shouldBe` [True, True, True, True, True, True, True, True, True]
 
+    it "should correctly compute that PCF produces Zero, Num and String" $
+      map (produces pcf) ["Zero", "Num", "String", "Succ", "Pred", "Ifz"] `shouldBe` [True, True, True, False, False, False]
+
+    it "should correctly compute that the infinite grammar does not produce \"foo\"" $
+      produces infinite "foo" `shouldBe` False
+
   describe "Emptiness" $ do
     it "should be true on the empty grammar" $
       isEmpty TreeAutomata.empty `shouldBe` True
