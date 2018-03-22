@@ -4,7 +4,7 @@ module TreeAutomata
   , Rhs (..)
   , Ctor
   , Name
-  , CtorInfo
+  , Alphabet
   , Arity
   , empty
   , wildcard
@@ -25,6 +25,7 @@ module TreeAutomata
   , elimSingles
   , dedup
   , epsilonClosure
+  , alphabet
   ) where
 
 import           Prelude hiding (sequence)
@@ -55,7 +56,7 @@ data Rhs = Ctor Ctor [Name] | Eps Name deriving (Show, Eq, Ord)
 type Prod = (Name, Rhs)
 -- The second field of `Grammar` is strict so whnf is enough to get real benchmark numbers
 data Grammar = Grammar Name !(Map.Map Name [Rhs]) deriving (Ord)
-type CtorInfo = Map.Map Ctor Arity
+type Alphabet = Map.Map Ctor Arity
 type Arity = Int
 
 instance Show Grammar where
@@ -92,7 +93,7 @@ empty = Grammar start (Map.fromList [(start, [])]) where
   start = uniqueStart
 
 -- | Creates a grammar with all possible terms over a given signature
-wildcard :: CtorInfo -> Grammar
+wildcard :: Alphabet -> Grammar
 wildcard ctxt = Grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, i) <- Map.toList ctxt])]) where
   start = uniqueStart
 
@@ -277,8 +278,8 @@ rhsNames :: Rhs -> [Name]
 rhsNames (Ctor _ ns) = ns
 rhsNames (Eps n) = [n]
 
-constructorInfo :: Grammar -> CtorInfo
-constructorInfo (Grammar _ p) = r where
+alphabet :: Grammar -> Alphabet
+alphabet (Grammar _ p) = r where
   r = case filter ((>1) . length) $ groupBy g ctors of
     [] -> Map.fromList ctors
     err -> error ("Inconsistent constructors: " ++ show err)

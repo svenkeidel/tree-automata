@@ -37,7 +37,7 @@ data Exp
 
 -- TODO: Exp validator (e.g. check that holes are properly nested)
 -- NOTE: start must not be hoisted up, otherwise the unsafeperformIO wont work
-expToTA :: CtorInfo -> Exp -> Grammar
+expToTA :: Alphabet -> Exp -> Grammar
 expToTA ctxt = go where
   go Empty = empty
   go Wild = wildcard ctxt
@@ -78,7 +78,7 @@ expToTA ctxt = go where
   newU name = unsafePerformIO (newUnique  name)
 
 type Neg a = State (Map.Map NonTerm [Rhs]) a
-negateTA :: CtorInfo -> Grammar -> Grammar
+negateTA :: Alphabet -> Grammar -> Grammar
 negateTA ctxt (Grammar start prods) = evalState m Map.empty where
   -- TODO: "any" non-terminal
   -- TODO: "nothing" non-terminal
@@ -149,7 +149,7 @@ orExp s = go 0 where
   go i (x:xs) = Or (Text.append (showt i) s) x (go (i + 1) xs)
 
 
-leftAssoc' :: CtorInfo -> [Ctor] -> Grammar
+leftAssoc' :: Alphabet -> [Ctor] -> Grammar
 leftAssoc' ctorInfo cs = expToTA ctorInfo (leftAssocExp ctorInfo cs)
 
 leftAssocExp ctorInfo cs = exp where
@@ -160,7 +160,7 @@ leftAssocExp ctorInfo cs = exp where
                  let i1 = Map.findWithDefault (error "leftAssoc.c1") c1 ctorInfo,
                  let i2 = Map.findWithDefault (error "leftAssoc.c2") c2 ctorInfo]
 
-rightAssoc' :: CtorInfo -> [Ctor] -> Grammar
+rightAssoc' :: Alphabet -> [Ctor] -> Grammar
 rightAssoc' ctorInfo cs = expToTA ctorInfo exp where
   exp = Neg (Seq "s1" (Any "s1") (orExp "rightAssoc" violations))
   violations = [ Cons c1 (Cons c2 (replicate i2 Wild) : replicate (i1-1) Wild) |
@@ -169,24 +169,24 @@ rightAssoc' ctorInfo cs = expToTA ctorInfo exp where
                  let i1 = Map.findWithDefault (error "rightAssoc.c1") c1 ctorInfo,
                  let i2 = Map.findWithDefault (error "rightAssoc.c2") c2 ctorInfo]
 
-leftAssoc :: CtorInfo -> [Ctor] -> Grammar
+leftAssoc :: Alphabet -> [Ctor] -> Grammar
 leftAssoc ctorInfo cs = Grammar ab (pAB +++ p +++ pABO) where
   Grammar ab pAB = anyButGrammar ctorInfo "Any" cs
   p = Map.fromList [("Any", [Ctor c (replicate (n-1) "Any" ++ [abo]) | (c, n) <- Map.assocs ctorInfo, c `elem` cs])]
   Grammar abo pABO = anyButOneGrammar ctorInfo "NoCtor" ab cs
 
-rightAssoc :: CtorInfo -> [Ctor] -> Grammar
+rightAssoc :: Alphabet -> [Ctor] -> Grammar
 rightAssoc ctorInfo cs = Grammar ab (pAB +++ p +++ pABO) where
   Grammar ab pAB = anyButGrammar ctorInfo "Any" cs
   p = Map.fromList [("Any", [Ctor c (abo : replicate (n-1) "Any") | (c, n) <- Map.assocs ctorInfo, c `elem` cs])]
   Grammar abo pABO = anyButOneGrammar ctorInfo "NoCtor" ab cs
 
-assocs :: CtorInfo -> [(Bool, [Ctor])] -> [Grammar]
+assocs :: Alphabet -> [(Bool, [Ctor])] -> [Grammar]
 assocs _ [] = []
 assocs ctorInfo ((isLeft, ctors) : rest) = f ctorInfo ctors : assocs ctorInfo rest where
   f = if isLeft then leftAssoc else rightAssoc
 
-assocs' :: CtorInfo -> [(Bool, [Ctor])] -> [Grammar]
+assocs' :: Alphabet -> [(Bool, [Ctor])] -> [Grammar]
 assocs' _ [] = []
 assocs' ctorInfo ((isLeft, ctors) : rest) = f ctorInfo ctors : assocs ctorInfo rest where
   f = if isLeft then leftAssoc' else rightAssoc'
@@ -209,7 +209,7 @@ precidence = precidenceGen f where
 
 -- h returning Nothing means break out of the precidence hierarchy
 -- h returning Just means go to that precidence level
-precidenceGen :: (Int -> Ctor -> Arity -> Maybe Int) -> CtorInfo -> [[Name]] -> Grammar
+precidenceGen :: (Int -> Ctor -> Arity -> Maybe Int) -> Alphabet -> [[Name]] -> Grammar
 precidenceGen h ctorInfo css = {-normalize $-} epsilonClosure $ Grammar ab ({-pAB `unionProds`-} pAB' `unionProds` p) where
   name :: Int -> Text
   name i = Text.append "Prec" (showt i)
