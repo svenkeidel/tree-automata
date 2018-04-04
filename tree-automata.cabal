@@ -36,10 +36,12 @@ test-suite specs
   ghc-options:         -Wall
   hs-source-dirs:      test
   main-is:             Spec.hs
+  other-modules:       TreeAutomataSpec
   build-depends:       base
                      , containers
                      , hspec
                      , HUnit
+                     , mtl
                      , text
                      , tree-automata
   default-language:    Haskell2010
