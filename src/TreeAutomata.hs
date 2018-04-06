@@ -1,10 +1,17 @@
-{-# LANGUAGE TupleSections, FlexibleContexts, OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 module TreeAutomata
-  ( Grammar
+  ( GrammarBuilder
+  , Grammar
   , Rhs (..)
   , Name
   , Alphabet
   , Arity
+
+  -- Constructions
   , empty
   , singleton
   , grammar
@@ -12,25 +19,27 @@ module TreeAutomata
   , wildcard
   , union
   , union'
-  , intersection
-  , permutate
-  , start
-  , productions
-  , produces
-  , rhs
-  , uniqueStart
   , sequence
+  , intersection
+
+  -- Transformations
+  , epsilonClosure
+  , normalize
+  , dedup
+  , removeUnproductive
+  , productive
+  , permutate
+
+  -- Queries
+  , produces
   , subsetOf
   , isEmpty
   , isProductive
-  , removeUnproductive
   , size
   , height
-  , shrink
-  , normalize
-  , elimSingles
-  , dedup
-  , epsilonClosure
+  , start
+  , productions
+  , rhs
   , alphabet
   ) where
 
@@ -60,10 +69,16 @@ type Ctor = Text -- Tree-constructor labels
 type Name = Text -- Non-terminal names
 data Rhs = Ctor Ctor [Name] | Eps Name deriving (Show, Eq, Ord)
 type Prod = (Name, Rhs)
+
 -- The second field of `Grammar` is strict so whnf is enough to get real benchmark numbers
-data Grammar = Grammar Name !(Map.Map Name [Rhs]) deriving (Ord)
+data Grammar = Grammar Name !(Map.Map Name [Rhs])
+type GrammarBuilder = State Int Grammar
+
 type Alphabet = Map.Map Ctor Arity
 type Arity = Int
+
+instance Show Grammar => Show GrammarBuilder where
+  show g = show (evalState g 0)
 
 instance Show Grammar where
   show (Grammar start prods) = "start: " ++ Text.unpack start ++ "\n" ++ concatMap f (sort $ Map.toList prods)
@@ -74,7 +89,7 @@ instance Show Grammar where
       g lhs (Ctor c ns) = Text.unpack lhs ++ " → " ++ Text.unpack c ++ "(" ++ Text.unpack (Text.intercalate ", " ns) ++ ")"
       g lhs (Eps n) = Text.unpack lhs ++ " → " ++ Text.unpack n
 
-instance Eq Grammar where
+instance Eq GrammarBuilder where
   g1 == g2 = g1 `subsetOf` g2 && g2 `subsetOf` g1
 
 -- TODO: Naming context in grammar
@@ -83,6 +98,9 @@ instance NFData Grammar where
 instance NFData Rhs where
   rnf (Ctor c ns) = rnf c `seq` rnf ns
   rnf (Eps n) = rnf n
+
+instance Hashable GrammarBuilder where
+  hashWithSalt s g = hashWithSalt s (evalState g 0)
 
 instance Hashable Grammar where
   hashWithSalt s (Grammar start prods) = s `hashWithSalt` (0::Int) `hashWithSalt` start `hashWithSalt` prods'
@@ -94,70 +112,188 @@ instance Hashable Rhs where
   hashWithSalt s (Eps name) = s `hashWithSalt` (1::Int) `hashWithSalt` name
 
 -- | Empty regular tree grammar
-empty :: Grammar
-empty = Grammar start (Map.fromList [(start, [])]) where
-  start = uniqueStart ()
+empty :: GrammarBuilder
+empty = do
+  start <- uniqueStart
+  return $ Grammar start (Map.fromList [(start, [])])
 
 -- | Creates a grammar with a single production from the start symbol
 -- to the given constant.
-singleton :: Name -> Grammar
-singleton c = Grammar start (Map.fromList [(start, [ Ctor c [] ])]) where
-  start = uniqueStart ()
+singleton :: Name -> GrammarBuilder
+singleton c = do
+  start <- uniqueStart
+  return (Grammar start (Map.fromList [(start, [ Ctor c [] ])]))
 
 -- | Create a grammar with the given start symbol and production rules
-grammar :: Name -> Map.Map Name [Rhs] -> Grammar
-grammar = Grammar
+grammar :: Name -> Map.Map Name [Rhs] -> GrammarBuilder
+grammar s ps = return (Grammar s ps)
 
 -- | Given a non-terminal symbol with n arguments, combines n grammars
 -- into a single new grammar containing this constructor.
-combine :: Name -> [Grammar] -> Grammar
-combine n gs = Grammar s $ Map.insertWith (++) s [ Ctor n ss ] ps where
-  s = uniqueStart ()
-  ss = map start gs
-  (Grammar _ ps) = union' gs
+combine :: Name -> [GrammarBuilder] -> GrammarBuilder
+combine n gs = do
+  s <- uniqueStart
+  Grammar _ ps <- union' gs
+  ss <- mapM (fmap start) gs
+  return (Grammar s $ Map.insertWith (++) s [ Ctor n ss ] ps)
 
 -- | Creates a grammar with all possible terms over a given signature
-wildcard :: Alphabet -> Grammar
-wildcard ctxt = Grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, i) <- Map.toList ctxt])]) where
-  start = uniqueStart ()
+wildcard :: Alphabet -> GrammarBuilder
+wildcard ctxt = do
+  start <- uniqueStart
+  return (Grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, i) <- Map.toList ctxt])]))
 
 -- | Union of two grammars. A new, unique start symbol is automatically created.
 -- If either of the grammars is empty, the other is returned as-is.
-union :: Grammar -> Grammar -> Grammar
+union :: GrammarBuilder -> GrammarBuilder -> GrammarBuilder
 union g1 g2 | isEmpty g1 = g2
             | isEmpty g2 = g1
-            | otherwise = Grammar start prods
-  where
-    (Grammar start1 prods1) = g1
-    (Grammar start2 prods2) = g2
-    start = uniqueStart ()
-    prods = Map.insert start (nub [Eps start1, Eps start2]) $ Map.unionWith (\r1 r2 -> nub $ r1 ++ r2) prods1 prods2
+            | otherwise = do
+                Grammar start1 prods1 <- g1
+                Grammar start2 prods2 <- g2
+                start <- uniqueStart
+                return (Grammar start (Map.insert start (nub [Eps start1, Eps start2]) $ Map.unionWith (\r1 r2 -> nub $ r1 ++ r2) prods1 prods2))
 
 -- | Union of a list of grammars. This simply iterates over the list,
 -- using `union` on each pair and `empty` for the base case.
-union' :: [Grammar] -> Grammar
-union' gs = case gs of
-  (x:xs) -> union x (union' xs)
-  [] -> empty
+union' :: [GrammarBuilder] -> GrammarBuilder
+union' = foldr union empty
 
 -- | Creates a grammar that produces the sequence of its two arguments.
-sequence :: Name -> Grammar -> Grammar -> Grammar
-sequence label (Grammar start1 prods1) (Grammar start2 prods2) =
-  Grammar start (Map.insert start [Eps start1] $
-                 Map.insertWith (++) label [Eps start2] $
-                 Map.unionWith (++) prods1 prods2)
-  where
-    start = uniqueStart ()
+sequence :: Name -> GrammarBuilder -> GrammarBuilder -> GrammarBuilder
+sequence label g1 g2 = do
+  Grammar start1 prods1 <- g1
+  Grammar start2 prods2 <- g2
+  start <- uniqueStart
+  return $ Grammar start (Map.insert start [Eps start1] $
+                          Map.insertWith (++) label [Eps start2] $
+                          Map.unionWith (++) prods1 prods2)
+
+-- | Returns the intersection of the two given grammars.
+-- The intersection is taken by taking the cross products of 1)
+-- the non-terminals, 2) the start symbols and 3) the production
+-- rules. Intuitively, this runs both grammars in parallel.
+intersection :: GrammarBuilder -> GrammarBuilder -> GrammarBuilder
+intersection g1 g2 = do
+  Grammar s1 p1 <- g1
+  Grammar s2 p2 <- g2
+  let
+    intersectName :: Name -> Name -> Name
+    intersectName n1 n2 = Text.concat [n1, "⨯", n2]
+    prods = [(intersectName n1 n2, [Ctor c1 (zipWith intersectName x1 x2) | Ctor c1 x1 <- r1, Ctor c2 x2 <- r2, c1 == c2] ++
+               [Eps (intersectName x n2) | Eps x <- r1] ++ [Eps (intersectName n1 x) | Eps x <- r2])
+            | (n1, r1) <- Map.toList p1, (n2, r2) <- Map.toList p2]
+  normalize $ epsilonClosure $ return $ Grammar (intersectName s1 s2) (Map.fromList prods)
+
+-- | Takes the epsilon closure of a grammar.
+epsilonClosure :: GrammarBuilder -> GrammarBuilder
+epsilonClosure g = do
+  Grammar s p <- g
+  let
+    close :: Name -> [Rhs]
+    close name = [r | r@(Ctor _ _) <- concatMap (fromJust . flip Map.lookup p) (reach name)]
+    reach :: Name -> [Name]
+    reach name = Set.toList $ execState (epsReach name) Set.empty where
+      epsReach :: Name -> State (Set.Set Name) ()
+      epsReach n = do
+        r <- get
+        unless (Set.member n r) $ do
+          put (Set.insert n r)
+          sequence_ [epsReach k | Eps k <- Map.findWithDefault (error ("Name " ++ show n ++ " not in the grammar")) n p]
+  return (Grammar s (Map.mapWithKey (\k _ -> close k) p))
+
+-- | Deduplicates a grammar by removing duplicate production rules.
+dedup :: GrammarBuilder -> GrammarBuilder
+dedup g = do
+  Grammar start prods <- g
+  return (Grammar start (Map.map (nub . sort) prods))
+
+-- | Removes productions for empty non-terminals
+dropEmpty :: GrammarBuilder -> GrammarBuilder
+dropEmpty g = do
+  Grammar s p <- g
+  let
+    filterProds = filter (all (`Set.member` nonEmpty) . rhsNames)
+    nonEmpty = execState (mapM_ f nulls) Set.empty
+    invMap = Map.fromList $
+             map (\xs -> (snd (head xs), nub $ sort $ map fst xs)) $
+             groupBy (\a b -> snd a == snd b) $
+             sortBy (\a b -> snd a `compare` snd b)
+             [(l, x) | (l, r) <- Map.toList p, x <- concatMap rhsNames r]
+    nulls = nub $ sort [l | (l, r) <- Map.toList p, Ctor _ [] <- r]
+    f :: Name -> State (Set.Set Name) ()
+    f n = do r <- get
+             unless (Set.member n r) $
+               when (any (all (`Set.member` r) . rhsNames) (case Map.lookup n p of Just x -> x)) $ do
+                 put (Set.insert n r)
+                 sequence_ [f x | x <- Map.findWithDefault [] n invMap]
+  return (Grammar s (Map.map filterProds (Map.filterWithKey (\k _ -> Set.member k nonEmpty) p)))
+
+-- | Removes productions that are not reachable form the start
+dropUnreachable :: GrammarBuilder -> GrammarBuilder
+dropUnreachable g = do
+  Grammar s p <- g
+  let
+    reachables = execState (f s) Set.empty
+    f :: Name -> State (Set.Set Name) ()
+    f n = do r <- get
+             unless (Set.member n r) $ do
+               put (Set.insert n r)
+               sequence_ [mapM_ f (rhsNames x) | x <- fromMaybe (error ("Name " ++ show n ++ " not in the grammar")) (Map.lookup n p)]
+  return $ Grammar s (Map.filterWithKey (\k _ -> Set.member k reachables) p) where
+
+-- | Removes useless productions.
+-- We drop unreachable first because that plays better with laziness.
+-- But we also drop unreachable after droping empty, because the empty may lead to unreachable.
+normalize :: GrammarBuilder -> GrammarBuilder
+normalize = dropUnreachable . dropEmpty . dropUnreachable
+
+-- | Removes all nonproductive non-terminals from the given grammar.
+removeUnproductive :: GrammarBuilder -> GrammarBuilder
+removeUnproductive g = do
+  Grammar start prods <- g
+  prodNs <- fmap productive g
+  return (Grammar start (Map.filterWithKey (\k _ -> k `Set.member` prodNs) prods))
+
+-- | Returns all productive nonterminals in the given grammar.
+productive :: Grammar -> Set.Set Name
+productive (Grammar _ prods) = execState (go prods) p where
+  p = Set.fromList [ n | (n, rhss) <- Map.toList prods, producesConstant rhss]
+  producesConstant :: [Rhs] -> Bool
+  producesConstant = isJust . find (\r -> case r of Ctor _ [] -> True; _ -> False)
+  filter :: [Rhs] -> Set.Set Name -> Bool
+  filter rhss p = case rhss of
+    (Ctor _ args : rhss) -> if and (map (`Set.member` p) args) then True else filter rhss p
+    (Eps nonterm : rhss) -> if Set.member nonterm p then True else filter rhss p
+    [] -> False
+  go :: Map.Map Name [Rhs] -> State (Set.Set Name) ()
+  go prods = do p <- get
+                let p' = Set.union p $ Set.fromList [ n | (n, rhss) <- Map.toList prods, filter rhss p ]
+                put p'
+                if p == p' then return () else go prods
+
+-- | Returns a list of grammars, where each grammar has a non-terminal
+-- symbol from the given grammar as start symbol.
+permutate :: GrammarBuilder -> State Int [GrammarBuilder]
+permutate g = do
+   Grammar _ ps <- g
+   return (map (\n -> return (Grammar n ps)) (Map.keys ps))
+
+-- | Returns true iff the grammar can construct the given constant.
+produces :: GrammarBuilder -> Name -> State Int Bool
+produces g n = do
+  Grammar s prods <- g
+  return (any (elem n) (Set.map (\p -> [ c | Ctor c [] <- fromJust $ Map.lookup p prods]) (productive (Grammar s prods))))
 
 data Constraint = Constraint (Name, Name) | Trivial Bool deriving (Show)
 type ConstraintSet = Map.Map (Name,Name) [[Constraint]]
 
 -- | Test whether the first grammar is a subset of the second, i.e. whether
 -- L(g1) ⊆ L(g2).
-subsetOf :: Grammar -> Grammar -> Bool
+subsetOf :: GrammarBuilder -> GrammarBuilder -> Bool
 g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) where
-  (Grammar s1 p1) = epsilonClosure $ removeUnproductive g1
-  (Grammar s2 p2) = epsilonClosure $ removeUnproductive g2
+  Grammar s1 p1 = evalState (epsilonClosure g1) 0
+  Grammar s2 p2 = evalState (epsilonClosure g2) 0
   solve :: (Name, Name) -> ConstraintSet -> Bool
   solve pair constraints = case Map.lookup pair constraints of
     Just deps -> and (map or (map (map (\c -> case c of Trivial t -> t; Constraint p -> solve p constraints)) deps))
@@ -166,15 +302,16 @@ g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) wh
   generate constraints toTest | Set.null toTest = constraints
                               | otherwise = do
                                   let (a1,a2) = Set.elemAt 0 toTest
-                                  let toTest' = Set.deleteAt 0 toTest
-                                  let dependencies = map (map (\c -> case c of Trivial t -> Trivial t
-                                                                               Constraint pair -> if pair `elem` Map.keys constraints || pair == (a1,a2)
-                                                                                 then Trivial True
-                                                                                 else Constraint pair)) $ shareCtor a1 a2
-                                  let constraints' = if not (null dependencies)
+                                      toTest' = Set.deleteAt 0 toTest
+                                      dependencies = map (map (\c -> case c of
+                                                                  Trivial t -> Trivial t
+                                                                  Constraint pair -> if pair `elem` Map.keys constraints || pair == (a1,a2)
+                                                                                     then Trivial True
+                                                                                     else Constraint pair)) $ shareCtor a1 a2
+                                      constraints' = if not (null dependencies)
                                         then Map.insert (a1,a2) dependencies constraints
                                         else constraints
-                                  let toTest'' = Set.union toTest' (Set.fromList [ (a1,a2) | pairs <- dependencies, Constraint (a1,a2) <- pairs, not $ elem (a1,a2) (Map.keys constraints') ])
+                                      toTest'' = Set.union toTest' (Set.fromList [ (a1,a2) | pairs <- dependencies, Constraint (a1,a2) <- pairs, not $ elem (a1,a2) (Map.keys constraints') ])
                                   generate constraints' toTest''
   shareCtor :: Name -> Name -> [[Constraint]]
   shareCtor a1 a2 = [ [ r | r2s <- maybeToList $ Map.lookup a2 p2, r2 <- r2s, r <- match r1 r2 ] | r1s <- maybeToList $ Map.lookup a1 p1, r1 <- r1s ]
@@ -189,49 +326,70 @@ g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) wh
 -- any reachable state is a finite state. In a regular tree grammar,
 -- this comes down to computing whether the start symbol is
 -- productive.
-isEmpty :: Grammar -> Bool
-isEmpty g@(Grammar start prods) = not $ isProductive start g
+isEmpty :: GrammarBuilder -> Bool
+isEmpty g = not (isProductive s g') where
+  g' = evalState g 0
+  s = start g'
 
 -- | Tests whether the given nonterminal is productive in the given
 -- grammar.
 isProductive :: Name -> Grammar -> Bool
-isProductive n g = Set.member n $ productive g
-
--- | Removes all nonproductive non-terminals from the given grammar.
-removeUnproductive :: Grammar -> Grammar
-removeUnproductive (Grammar start prods) = Grammar start prods' where
-  prodNs = productive (Grammar start prods)
-  prods' = Map.filterWithKey (\k _ -> k `Set.member` prodNs) prods
-
--- | Returns all productive nonterminals in the given grammar.
-productive :: Grammar -> Set.Set Name
-productive (Grammar _ prods) = execState (go prods) p
-  where
-    p = Set.fromList [ n | (n, rhss) <- Map.toList prods, producesConstant rhss]
-    producesConstant :: [Rhs] -> Bool
-    producesConstant = isJust . find (\r -> case r of Ctor _ [] -> True; _ -> False)
-    filter :: [Rhs] -> Set.Set Name -> Bool
-    filter rhss p = case rhss of
-      (Ctor _ args : rhss) -> if and (map (`Set.member` p) args) then True else filter rhss p
-      (Eps nonterm : rhss) -> if Set.member nonterm p then True else filter rhss p
-      [] -> False
-    go :: Map.Map Name [Rhs] -> State (Set.Set Name) ()
-    go prods = do p <- get
-                  let p' = Set.union p $ Set.fromList [ n | (n, rhss) <- Map.toList prods, filter rhss p ]
-                  put p'
-                  if p == p' then return () else go prods
+isProductive n g = Set.member n (productive g)
 
 -- | The size of a regular tree grammar is defined as SUM_(A∈N)(SUM_(A→α) |Aα|).
-size :: Grammar -> Int
-size (Grammar _ ps) = Map.foldr (\rhss acc -> foldr (\rhs acc -> 1 + sizeRhs rhs acc) acc rhss) 0 ps
+size :: GrammarBuilder -> Int
+size g = Map.foldr (\rhss acc -> foldr (\rhs acc -> 1 + sizeRhs rhs acc) acc rhss) 0 ps where
+  Grammar _ ps = evalState g 0
 
+-- | The size of a right hand side.
 sizeRhs :: Rhs -> Int -> Int
 sizeRhs (Ctor _ args) acc = acc + length args
 sizeRhs (Eps _) acc = acc + 1
 
 -- | The height of a regular tree grammar is defined as the number of production rules.
-height :: Grammar -> Int
-height (Grammar _ ps) = Map.foldr (\rhss acc -> acc + length rhss) 0 ps
+height :: GrammarBuilder -> Int
+height g = Map.foldr (\rhss acc -> acc + length rhss) 0 ps where
+  Grammar _ ps = evalState g 0
+
+-- | Returns the start symbol of the given grammar.
+start :: Grammar -> Name
+start (Grammar s _) = s
+
+-- | Returns the productions of the given grammar.
+productions :: Grammar -> Map.Map Name [Rhs]
+productions (Grammar _ ps) = ps
+
+-- | Returns the right hand sides of the given non-terminal symbol in
+-- the given grammar.
+rhs :: Grammar -> Name -> [Rhs]
+rhs (Grammar _ ps) n = fromMaybe [] $ Map.lookup n ps
+
+-- | List the names that occur in a right hand side.
+rhsNames :: Rhs -> [Name]
+rhsNames (Ctor _ ns) = ns
+rhsNames (Eps n) = [n]
+
+-- | Returns the alphabet over which the given grammar operates.
+alphabet :: Grammar -> Alphabet
+alphabet (Grammar _ p) = r where
+  r = case filter ((>1) . length) $ groupBy g' ctors of
+    [] -> Map.fromList ctors
+    err -> error ("Inconsistent constructors: " ++ show err)
+  ctors = nub $ sort $ concatMap f $ concat $ Map.elems p
+  f (Ctor c n) = [(c, length n)]
+  f (Eps _) = []
+  g' (c1, _) (c2, _) = c1 == c2
+
+fresh :: State Int Int
+fresh = do
+  x <- get
+  put (x+1)
+  return x
+
+uniqueStart :: State Int Text
+uniqueStart = do
+  x <- fresh
+  return $ Text.pack ("Start" ++ show x)
 
 {-
 -- | Test the equality of two regular tree grammars
@@ -266,82 +424,7 @@ eqGrammar' (Grammar s1 ps1) (Grammar s2 ps2) = fst (head rs)
   g p1 p2 = throwError $ "Mismatched prods: " ++ show (p1, p2)
 -}
 
--- | Returns the intersection of the two given grammars.
--- The intersection is taken by taking the cross products of 1)
--- the non-terminals, 2) the start symbols and 3) the production
--- rules. Intuitively, this runs both grammars in parallel.
-intersection :: Grammar -> Grammar -> Grammar
-intersection (Grammar s1 p1) (Grammar s2 p2) = normalize $ epsilonClosure $ Grammar (intersectName s1 s2) (Map.fromList prods) where
-  intersectName :: Name -> Name -> Name
-  intersectName n1 n2 = Text.concat [n1, "⨯", n2]
-  prods = [(intersectName n1 n2, [Ctor c1 (zipWith intersectName x1 x2) | Ctor c1 x1 <- r1, Ctor c2 x2 <- r2, c1 == c2] ++
-            [Eps (intersectName x n2) | Eps x <- r1] ++ [Eps (intersectName n1 x) | Eps x <- r2])
-           | (n1, r1) <- Map.toList p1, (n2, r2) <- Map.toList p2]
-
--- | Returns a list of grammars, where each grammar has a non-terminal
--- symbol from the given grammar as start symbol.
-permutate :: Grammar -> [Grammar]
-permutate (Grammar _ ps) = map (\n -> (Grammar n ps)) (Map.keys ps)
-
--- | Returns the start symbol of the given grammar.
-start :: Grammar -> Name
-start (Grammar s _) = s
-
--- | Returns the productions of the given grammar.
-productions :: Grammar -> Map.Map Name [Rhs]
-productions (Grammar _ ps) = ps
-
--- | Returns true iff the grammar can construct the given constant.
-produces :: Grammar -> Name -> Bool
-produces (Grammar s prods) n = any (elem n) ctors where
-  ps = productive (Grammar s prods)
-  ctors = Set.map (\p -> [ c | Ctor c [] <- fromJust $ Map.lookup p prods]) ps
-
--- | Returns the right hand sides of the given non-terminal symbol in
--- the given grammar.
-rhs :: Grammar -> Name -> [Rhs]
-rhs (Grammar _ ps) n = fromMaybe [] $ Map.lookup n ps
-
-freshInt :: IORef Int
-freshInt = unsafePerformIO (newIORef 0)
-{-# NOINLINE freshInt #-}
-
-fresh :: () -> Int
-fresh _ = unsafePerformIO $ do
-  x <- readIORef freshInt
-  writeIORef freshInt (x+1)
-  return x
-{-# NOINLINE fresh #-}
-
-uniqueStart :: () -> Text
-uniqueStart _ = Text.pack $ "Start" ++ show (fresh ())
-
--- | List the names that occur in a Rhs.
-rhsNames :: Rhs -> [Name]
-rhsNames (Ctor _ ns) = ns
-rhsNames (Eps n) = [n]
-
-alphabet :: Grammar -> Alphabet
-alphabet (Grammar _ p) = r where
-  r = case filter ((>1) . length) $ groupBy g ctors of
-    [] -> Map.fromList ctors
-    err -> error ("Inconsistent constructors: " ++ show err)
-  ctors = nub $ sort $ concatMap f $ concat $ Map.elems p
-  f (Ctor c n) = [(c, length n)]
-  f (Eps _) = []
-  g (c1, _) (c2, _) = c1 == c2
-
-epsilonClosure :: Grammar -> Grammar
-epsilonClosure (Grammar s p) = Grammar s (Map.mapWithKey (\k _ -> close k) p) where
-  close name = [r | r@(Ctor _ _) <- concatMap (fromJust . flip Map.lookup p) reach] where
-    reach :: [Name]
-    reach = Set.toList $ execState (epsReach name) Set.empty
-  epsReach n = do
-    r <- get
-    unless (Set.member n r) $ do
-      put (Set.insert n r)
-      sequence_ [epsReach k | Eps k <- Map.findWithDefault (error ("Name " ++ show n ++ " not in the grammar")) n p]
-
+{-
 introduceEpsilons :: Grammar -> Grammar
 introduceEpsilons g = Grammar start $ Map.mapWithKey go prodMap where
   Grammar start prodMap  = shrink $ epsilonClosure g
@@ -521,43 +604,7 @@ elimSingleUse (Grammar s p) = normalize (Grammar s (Map.map replaceSingleUse p))
   useCountProd n (Ctor _ rhs)
     | n `elem` rhs = 2 -- Use 2 since it can't be inlined
     | otherwise = 0
-
-dedup :: Grammar -> Grammar
-dedup (Grammar start prods) = Grammar start (Map.map (nub . sort) prods)
-
--- | Remove productions for empty non-terminals
-dropEmpty :: Grammar -> Grammar
-dropEmpty (Grammar s p) = Grammar s (Map.map filterProds (Map.filterWithKey (\k _ -> Set.member k nonEmpty) p)) where
-  filterProds = filter (all (`Set.member` nonEmpty) . rhsNames)
-  nonEmpty = execState (mapM_ f nulls) Set.empty
-  invMap = Map.fromList $
-           map (\xs -> (snd (head xs), nub $ sort $ map fst xs)) $
-           groupBy (\a b -> snd a == snd b) $
-           sortBy (\a b -> snd a `compare` snd b)
-           [(l, x) | (l, r) <- Map.toList p, x <- concatMap rhsNames r]
-  nulls = nub $ sort [l | (l, r) <- Map.toList p, Ctor _ [] <- r]
-  f :: Name -> State (Set.Set Name) ()
-  f n = do r <- get
-           unless (Set.member n r) $
-             when (any (all (`Set.member` r) . rhsNames) (case Map.lookup n p of Just x -> x)) $ do
-               put (Set.insert n r)
-               sequence_ [f x | x <- Map.findWithDefault [] n invMap]
-
--- | Remove productions that are not reachable form the start
-dropUnreachable :: Grammar -> Grammar
-dropUnreachable (Grammar s p) = Grammar s (Map.filterWithKey (\k _ -> Set.member k reachables) p) where
-  reachables = execState (f s) Set.empty
-  f :: Name -> State (Set.Set Name) ()
-  f n = do r <- get
-           unless (Set.member n r) $ do
-             put (Set.insert n r)
-             sequence_ [mapM_ f (rhsNames x) | x <- fromMaybe (error ("Name " ++ show n ++ " not in the grammar")) (Map.lookup n p)]
-
--- | Remove useless productions.
--- We drop unreachable first because that plays better with laziness.
--- But we also drop unreachable after droping empty, because the empty may lead to unreachable.
-normalize :: Grammar -> Grammar
-normalize = dropUnreachable . dropEmpty . dropUnreachable
+-}
 
 {-
 -- NOTE: assumes (1) no epsilons, (2) fixed arity labels, and (3) that tokens are identical for identical labels

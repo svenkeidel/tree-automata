@@ -2,6 +2,7 @@
 module TreeAutomataSpec(main, spec) where
 
 import           Control.Monad
+import           Control.Monad.State hiding (sequence)
 
 import qualified Data.Map as M
 
@@ -42,34 +43,36 @@ spec = do
     it "should be defined on an infinite grammar" $
       height infinite `shouldBe` 2
 
-  describe "Unique names" $ do
-    it "should always produce a unique start symbol" $
-      [ uniqueStart (), uniqueStart (), uniqueStart ()] `shouldBe` ["Start1","Start2","Start3"]
-
   describe "Productivity" $ do
-    it "should give all nonterminals for PCF" $
-      map (`isProductive` pcf) ["Exp", "Type", "String", "PStart"] `shouldBe` [True, True, True, True]
+    it "should give all nonterminals for PCF" $ do
+      let pcf' = evalState pcf 0
+      map (`isProductive` pcf') ["Exp", "Type", "String", "PStart"] `shouldBe` [True, True, True, True]
 
-    it "should give no nonterminals for infinite" $
-      map (`isProductive` infinite) ["foo", "EStart"] `shouldBe` [False, False]
+    it "should give no nonterminals for infinite" $ do
+      let infinite' = evalState infinite 0
+      map (`isProductive` infinite') ["foo", "EStart"] `shouldBe` [False, False]
 
-    it "should give all nonterminals for simple" $
-      map (`isProductive` simple) ["S", "A", "G", "F"] `shouldBe` [True, True, True, True]
+    it "should give all nonterminals for simple" $ do
+      let simple'' = evalState simple 0
+      map (`isProductive` simple'') ["S", "A", "G", "F"] `shouldBe` [True, True, True, True]
 
-    it "should give all nonterminals for simple'" $
-      map (`isProductive` simple') ["S", "A", "G", "H", "F"] `shouldBe` [True, True, True, True, True]
+    it "should give all nonterminals for simple'" $ do
+      let simple''' = evalState simple' 0
+      map (`isProductive` simple''') ["S", "A", "G", "H", "F"] `shouldBe` [True, True, True, True, True]
 
-    it "should give all nonterminals for the PCF subset" $
-      map (`isProductive` pcf_sub) ["PSStart", "Exp", "Type"] `shouldBe` [True, True, True]
+    it "should give all nonterminals for the PCF subset" $ do
+      let pcf_sub' = evalState pcf_sub 0
+      map (`isProductive` pcf_sub') ["PSStart", "Exp", "Type"] `shouldBe` [True, True, True]
 
-    it "should give all nonterminals for the union of PCF and simple" $
-      map (`isProductive` pcf_simple) ["Start5", "PStart", "S", "A", "G", "F", "Exp", "Type", "Type"] `shouldBe` [True, True, True, True, True, True, True, True, True]
+    it "should give all nonterminals for the union of PCF and simple" $ do
+      let pcf_simple' = evalState pcf_simple 0
+      map (`isProductive` pcf_simple') ["Start0", "PStart", "S", "A", "G", "F", "Exp", "Type", "Type"] `shouldBe` [True, True, True, True, True, True, True, True, True]
 
     it "should correctly compute that PCF produces Zero, Num and String" $
-      map (produces pcf) ["Zero", "Num", "String", "Succ", "Pred", "Ifz"] `shouldBe` [True, True, True, False, False, False]
+      map (\n -> evalState (produces pcf n) 0) ["Zero", "Num", "String", "Succ", "Pred", "Ifz"] `shouldBe` [True, True, True, False, False, False]
 
     it "should correctly compute that the infinite grammar does not produce \"foo\"" $
-      produces infinite "foo" `shouldBe` False
+      evalState (produces infinite "foo") 0 `shouldBe` False
 
   describe "Emptiness" $ do
     it "should be true on the empty grammar" $
@@ -89,13 +92,13 @@ spec = do
 
   describe "Union" $ do
     it "should work on the union of two small grammars" $
-      let g1 = grammar "Start1" $ M.fromList [ ("Start1", [ Eps "Exp" ])
-                                             , ("Exp", [ Ctor "Zero" [] ])]
-          g2 = grammar "Start2" $ M.fromList [ ("Start2", [ Eps "Type" ])
-                                             , ("Type", [ Ctor "Num" [] ])]
-          g3 = grammar "Start4" $ M.fromList [ ("Start4", [ Eps "Start1", Eps "Start2" ])
-                                             , ("Start1", [ Eps "Exp" ])
-                                             , ("Start2", [ Eps "Type" ])
+      let g1 = grammar "Foo" $ M.fromList [ ("Foo", [ Eps "Exp" ])
+                                          , ("Exp", [ Ctor "Zero" [] ])]
+          g2 = grammar "Bar" $ M.fromList [ ("Bar", [ Eps "Type" ])
+                                          , ("Type", [ Ctor "Num" [] ])]
+          g3 = grammar "Start0" $ M.fromList [ ("Start0", [ Eps "Foo", Eps "Bar" ])
+                                             , ("Foo", [ Eps "Exp" ])
+                                             , ("Bar", [ Eps "Type" ])
                                              , ("Exp", [ Ctor "Zero" [] ])
                                              , ("Type", [ Ctor "Num" [] ])]
       in union g1 g2 `shouldBeLiteral` g3
@@ -174,15 +177,15 @@ spec = do
 
   describe "Permutation" $ do
     it "should work on the empty grammar" $
-      permutate empty `shouldBe` [ grammar "Start0" M.empty ]
+      evalState (permutate empty) 0 `shouldBe` [ grammar "Start0" M.empty ]
 
     it "should work on the infinite grammar" $ do
-      let ps = productions infinite
-      permutate infinite `shouldBe` [ infinite, (grammar "foo" ps) ]
+      let ps = productions (evalState infinite 0)
+      evalState (permutate infinite) 0 `shouldBe` [ infinite, (grammar "foo" ps) ]
 
     it "should work on the simple grammar" $ do
-      let ps = productions simple
-      permutate simple `shouldBe` [ (grammar "A" ps), (grammar "F" ps), (grammar "G" ps), simple ]
+      let ps = productions (evalState simple 0)
+      evalState (permutate simple) 0 `shouldBe` [ (grammar "A" ps), (grammar "F" ps), (grammar "G" ps), simple ]
 
   describe "Equality" $ do
     it "should be true when comparing the empty grammar" $ do
@@ -192,6 +195,10 @@ spec = do
     it "should be true when comparing the same grammar" $ do
       pcf == pcf `shouldBe` True
       pcf `shouldBe` pcf
+
+    it "should be true when comparing the same grammar (simple)" $ do
+      simple == simple `shouldBe` True
+      simple `shouldBe` simple
 
     it "should be false when comparing different grammars" $ do
       pcf == simple `shouldBe` False
@@ -255,7 +262,7 @@ spec = do
                                                        , Ctor "Zero" []])
                                              , ("Type", [ Ctor "Num" []
                                                         , Ctor "Fun" ["Type", "Type"]])]
-    pcf_simple = grammar "Start5" $ M.fromList [ ("Start5", [ Eps "PStart"
+    pcf_simple = grammar "Start0" $ M.fromList [ ("Start0", [ Eps "PStart"
                                                             , Eps "S" ])
                                                , ("PStart", [ Eps "Exp"
                                                             , Eps "Type" ])
@@ -283,9 +290,12 @@ spec = do
     -- should look like. In fact, this is an even stricter test than
     -- simply comparing grammars using `==`, because we now also
     -- detect spurious non-terminal symbols and production rules.
-    shouldBeLiteral :: Grammar -> Grammar -> Expectation
+    shouldBeLiteral :: GrammarBuilder -> GrammarBuilder -> Expectation
     actual `shouldBeLiteral` expected =
       -- TODO: apparently the order of the right hand sides in the maps matters. For now, just make the right order in the test cases,
       -- but eventually we should implement a custom equality check that does not depend on order.
-        unless (start actual == start expected && productions actual == productions expected)
+        unless (start actual' == start expected' && productions actual' == productions expected')
           (assertFailure $ "Grammars are not literally equal.\nExpected:\n\n" ++ show expected ++ "\nbut got:\n\n" ++ show actual)
+        where
+          expected' = evalState expected 0
+          actual' = evalState actual 0
