@@ -3,6 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE ViewPatterns #-}
 module TreeAutomata
   ( GrammarBuilder
   , Grammar
@@ -28,12 +29,15 @@ module TreeAutomata
   , removeUnproductive
   , productive
   , permutate
+  , toSubterms
+  , fromSubterms
 
   -- Queries
   , produces
   , subsetOf
   , isEmpty
   , isProductive
+  , nthSubterm
   , size
   , height
   , start
@@ -264,6 +268,19 @@ permutate g = do
    Grammar _ ps <- g
    return (map (\n -> return (Grammar n ps)) (Map.keys ps))
 
+-- | Destructs a grammar into a list of (N, [G]) tuples where N is a
+-- non-terminal and [G] is a list of grammars, with each grammar G in
+-- this tuple having a subterm of N as start symbol.
+toSubterms :: GrammarBuilder a -> [(a,[GrammarBuilder a])]
+toSubterms (epsilonClosure -> b) =
+  let Grammar s ps = evalState b 0
+  in [ (c,[nthSubterm n m b | (_,m) <- zip ts [0..]]) | (Ctor c ts,n) <- zip (fromMaybe [] (Map.lookup s ps)) [0..] ]
+
+-- | The opposite of `toSubterms`, i.e., given such a list of tuples,
+-- rebuilds the original grammar.
+fromSubterms :: Eq a =>  [(a, [GrammarBuilder a])] -> GrammarBuilder a
+fromSubterms = epsilonClosure . foldr (\(c, gs) g -> union (addConstructor c gs) g) empty
+
 -- | Returns true iff the grammar can construct the given constant.
 produces :: Ord a => GrammarBuilder a -> a -> Bool
 produces g n = any (elem n) (Set.map (\p -> [ c | Ctor c [] <- fromJust $ Map.lookup p prods]) (productive (Grammar s prods))) where
@@ -319,6 +336,21 @@ isEmpty g = not (isProductive s g') where
 -- grammar.
 isProductive :: Name -> Grammar a -> Bool
 isProductive n g = Set.member n (productive g)
+
+-- | Returns a grammar where the start symbol points to the m-th
+-- subterm of the n-th production of the original start symbol.
+-- If either index is out of bounds, the original grammar is returned.
+nthSubterm :: Int -> Int -> GrammarBuilder a -> GrammarBuilder a
+nthSubterm n m g = do
+  Grammar s ps <- g
+  let prods = fromMaybe [] (Map.lookup s ps)
+  if n >= length prods
+    then g
+    else
+      let Ctor _ args = prods !! n
+      in if m >= length args
+           then g
+           else return (Grammar (args !! m) ps)
 
 -- | The size of a regular tree grammar is defined as SUM_(A∈N)(SUM_(A→α) |Aα|).
 size :: GrammarBuilder a -> Int

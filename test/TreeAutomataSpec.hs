@@ -18,6 +18,19 @@ main = hspec spec
 spec :: Spec
 spec = do
 
+  describe "Subterms" $ do
+    it "should destruct and rebuild PCF" $
+      fromSubterms (toSubterms pcf) `shouldBe` pcf
+
+    it "should destruct and rebuild simple" $
+      fromSubterms (toSubterms simple) `shouldBe` simple
+
+    it "should destruct and rebuild the empty grammar" $
+      fromSubterms (toSubterms (empty::GrammarBuilder Text)) `shouldBe` empty
+
+    it "should destruct and rebuild the infinite grammar into the empty grammar" $ do
+      fromSubterms (toSubterms infinite) `shouldBe` empty
+
   describe "Size" $ do
     it "should be 25 on PCF" $
       size pcf `shouldBe` 25
@@ -77,7 +90,7 @@ spec = do
 
   describe "Emptiness" $ do
     it "should be true on the empty grammar" $
-      isEmpty TreeAutomata.empty `shouldBe` True
+      isEmpty empty `shouldBe` True
 
     it "should be true on the infinite infinite grammar" $
       isEmpty infinite `shouldBe` True
@@ -106,6 +119,9 @@ spec = do
 
     it "should work on the union of the simple and PCF grammars" $
       union pcf simple `shouldBeLiteral` pcf_simple
+
+    it "should work on the union of the infinite and empty grammars" $
+      union infinite empty `shouldBe` empty
 
     it "the list version should work on an empty list" $
       (union' []::GrammarBuilder Text) `shouldBe` empty
