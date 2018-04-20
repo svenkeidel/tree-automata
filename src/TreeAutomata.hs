@@ -8,7 +8,7 @@ module TreeAutomata
   ( GrammarBuilder
   , Grammar
   , Rhs (..)
-  , Name
+  , Nonterm
   , Alphabet
   , Arity
 
@@ -68,12 +68,12 @@ import           System.IO.Unsafe
 import           Util
 
 type Ctor = Text -- Tree-constructor labels
-type Name = Text -- Non-terminal names
-data Rhs a = Ctor a [Name] | Eps Name deriving (Show, Eq, Ord)
-type Prod a = (Name, Rhs a)
+type Nonterm = Text -- Non-terminal names
+data Rhs a = Ctor a [Nonterm] | Eps Nonterm deriving (Show, Eq, Ord)
+type Prod a = (Nonterm, Rhs a)
 
 -- The second field of `Grammar` is strict so whnf is enough to get real benchmark numbers
-data Grammar a = Grammar Name !(Map.Map Name [Rhs a])
+data Grammar a = Grammar Nonterm !(Map.Map Nonterm [Rhs a])
 type GrammarBuilder a = State Int (Grammar a)
 
 type Alphabet a = Map.Map a Arity
@@ -127,7 +127,7 @@ singleton c = do
   return (Grammar start (Map.fromList [(start, [ Ctor c [] ])]))
 
 -- | Create a grammar with the given start symbol and production rules
-grammar :: Name -> Map.Map Name [Rhs a] -> GrammarBuilder a
+grammar :: Nonterm -> Map.Map Nonterm [Rhs a] -> GrammarBuilder a
 grammar s ps = return (Grammar s ps)
 
 -- | Given a non-terminal symbol with n arguments, combines n grammars
@@ -169,12 +169,12 @@ intersection g1 g2 = do
   Grammar s1 p1 <- g1
   Grammar s2 p2 <- g2
   let
-    intersectName :: Name -> Name -> Name
-    intersectName n1 n2 = Text.concat [n1, "⨯", n2]
-    prods = [(intersectName n1 n2, [Ctor c1 (zipWith intersectName x1 x2) | Ctor c1 x1 <- r1, Ctor c2 x2 <- r2, c1 == c2] ++
-               [Eps (intersectName x n2) | Eps x <- r1] ++ [Eps (intersectName n1 x) | Eps x <- r2])
+    intersectNonterm :: Nonterm -> Nonterm -> Nonterm
+    intersectNonterm n1 n2 = Text.concat [n1, "⨯", n2]
+    prods = [(intersectNonterm n1 n2, [Ctor c1 (zipWith intersectNonterm x1 x2) | Ctor c1 x1 <- r1, Ctor c2 x2 <- r2, c1 == c2] ++
+               [Eps (intersectNonterm x n2) | Eps x <- r1] ++ [Eps (intersectNonterm n1 x) | Eps x <- r2])
             | (n1, r1) <- Map.toList p1, (n2, r2) <- Map.toList p2]
-  normalize $ epsilonClosure $ return $ Grammar (intersectName s1 s2) (Map.fromList prods)
+  normalize $ epsilonClosure $ return $ Grammar (intersectNonterm s1 s2) (Map.fromList prods)
 
 -- | Takes the epsilon closure of a grammar.
 epsilonClosure :: GrammarBuilder a -> GrammarBuilder a
@@ -182,14 +182,14 @@ epsilonClosure g = do
   Grammar s p <- g
   let
     close name = [r | r@(Ctor _ _) <- concatMap (fromJust . flip Map.lookup p) (reach name)]
-    reach :: Name -> [Name]
+    reach :: Nonterm -> [Nonterm]
     reach name = Set.toList $ execState (epsReach name) Set.empty where
-      epsReach :: Name -> State (Set.Set Name) ()
+      epsReach :: Nonterm -> State (Set.Set Nonterm) ()
       epsReach n = do
         r <- get
         unless (Set.member n r) $ do
           put (Set.insert n r)
-          sequence_ [epsReach k | Eps k <- Map.findWithDefault (error ("Name " ++ show n ++ " not in the grammar")) n p]
+          sequence_ [epsReach k | Eps k <- Map.findWithDefault (error ("Nonterm " ++ show n ++ " not in the grammar")) n p]
   return (Grammar s (Map.mapWithKey (\k _ -> close k) p))
 
 -- | Deduplicates a grammar by removing duplicate production rules.
@@ -203,18 +203,18 @@ dropEmpty :: GrammarBuilder a -> GrammarBuilder a
 dropEmpty g = do
   Grammar s p <- g
   let
-    filterProds = filter (all (`Set.member` nonEmpty) . rhsNames)
+    filterProds = filter (all (`Set.member` nonEmpty) . rhsNonterms)
     nonEmpty = execState (mapM_ f nulls) Set.empty
     invMap = Map.fromList $
              map (\xs -> (snd (head xs), nub $ sort $ map fst xs)) $
              groupBy (\a b -> snd a == snd b) $
              sortBy (\a b -> snd a `compare` snd b)
-             [(l, x) | (l, r) <- Map.toList p, x <- concatMap rhsNames r]
+             [(l, x) | (l, r) <- Map.toList p, x <- concatMap rhsNonterms r]
     nulls = nub $ sort [l | (l, r) <- Map.toList p, Ctor _ [] <- r]
-    f :: Name -> State (Set.Set Name) ()
+    f :: Nonterm -> State (Set.Set Nonterm) ()
     f n = do r <- get
              unless (Set.member n r) $
-               when (any (all (`Set.member` r) . rhsNames) (case Map.lookup n p of Just x -> x)) $ do
+               when (any (all (`Set.member` r) . rhsNonterms) (case Map.lookup n p of Just x -> x)) $ do
                  put (Set.insert n r)
                  sequence_ [f x | x <- Map.findWithDefault [] n invMap]
   return (Grammar s (Map.map filterProds (Map.filterWithKey (\k _ -> Set.member k nonEmpty) p)))
@@ -225,11 +225,11 @@ dropUnreachable g = do
   Grammar s p <- g
   let
     reachables = execState (f s) Set.empty
-    f :: Name -> State (Set.Set Name) ()
+    f :: Nonterm -> State (Set.Set Nonterm) ()
     f n = do r <- get
              unless (Set.member n r) $ do
                put (Set.insert n r)
-               sequence_ [mapM_ f (rhsNames x) | xs <- maybeToList (Map.lookup n p), x <- xs ]
+               sequence_ [mapM_ f (rhsNonterms x) | x <- fromMaybe (error ("Nonterm " ++ show n ++ " not in the grammar")) (Map.lookup n p)]
   return $ Grammar s (Map.filterWithKey (\k _ -> Set.member k reachables) p) where
 
 -- | Removes useless productions.
@@ -246,17 +246,17 @@ removeUnproductive g = do
   return (Grammar start (Map.filterWithKey (\k _ -> k `Set.member` prodNs) prods))
 
 -- | Returns all productive nonterminals in the given grammar.
-productive :: Grammar a -> Set.Set Name
+productive :: Grammar a -> Set.Set Nonterm
 productive (Grammar _ prods) = execState (go prods) p where
   p = Set.fromList [ n | (n, rhss) <- Map.toList prods, producesConstant rhss]
   producesConstant :: [Rhs a] -> Bool
   producesConstant = isJust . find (\r -> case r of Ctor _ [] -> True; _ -> False)
-  filter :: [Rhs a] -> Set.Set Name -> Bool
+  filter :: [Rhs a] -> Set.Set Nonterm -> Bool
   filter rhss p = case rhss of
     (Ctor _ args : rhss) -> if and (map (`Set.member` p) args) then True else filter rhss p
     (Eps nonterm : rhss) -> if Set.member nonterm p then True else filter rhss p
     [] -> False
-  go :: Map.Map Name [Rhs a] -> State (Set.Set Name) ()
+  go :: Map.Map Nonterm [Rhs a] -> State (Set.Set Nonterm) ()
   go prods = do p <- get
                 let p' = Set.union p $ Set.fromList [ n | (n, rhss) <- Map.toList prods, filter rhss p ]
                 put p'
@@ -287,8 +287,8 @@ produces :: Ord a => GrammarBuilder a -> a -> Bool
 produces g n = any (elem n) (Set.map (\p -> [ c | Ctor c [] <- fromJust $ Map.lookup p prods]) (productive (Grammar s prods))) where
   Grammar s prods = evalState g 0
 
-data Constraint = Constraint (Name, Name) | Trivial Bool deriving (Show)
-type ConstraintSet = Map.Map (Name,Name) [[Constraint]]
+data Constraint = Constraint (Nonterm, Nonterm) | Trivial Bool deriving (Show)
+type ConstraintSet = Map.Map (Nonterm,Nonterm) [[Constraint]]
 
 -- | Test whether the first grammar is a subset of the second, i.e. whether
 -- L(g1) ⊆ L(g2).
@@ -296,11 +296,11 @@ subsetOf :: Eq a => GrammarBuilder a -> GrammarBuilder a -> Bool
 g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) where
   Grammar s1 p1 = evalState (epsilonClosure g1) 0
   Grammar s2 p2 = evalState (epsilonClosure g2) 0
-  solve :: (Name, Name) -> ConstraintSet -> Bool
+  solve :: (Nonterm, Nonterm) -> ConstraintSet -> Bool
   solve pair constraints = case Map.lookup pair constraints of
     Just deps -> and (map or (map (map (\c -> case c of Trivial t -> t; Constraint p -> solve p constraints)) deps))
     Nothing -> True
-  generate :: ConstraintSet -> Set.Set (Name,Name) -> ConstraintSet
+  generate :: ConstraintSet -> Set.Set (Nonterm,Nonterm) -> ConstraintSet
   generate constraints toTest | Set.null toTest = constraints
                               | otherwise = do
                                   let (a1,a2) = Set.elemAt 0 toTest
@@ -315,7 +315,7 @@ g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) wh
                                         else constraints
                                       toTest'' = Set.union toTest' (Set.fromList [ (a1,a2) | pairs <- dependencies, Constraint (a1,a2) <- pairs, not $ elem (a1,a2) (Map.keys constraints') ])
                                   generate constraints' toTest''
-  shareCtor :: Name -> Name -> [[Constraint]]
+  shareCtor :: Nonterm -> Nonterm -> [[Constraint]]
   shareCtor a1 a2 = [ [ r | r2s <- maybeToList $ Map.lookup a2 p2, r2 <- r2s, r <- match r1 r2 ] | r1s <- maybeToList $ Map.lookup a1 p1, r1 <- r1s ]
   match :: Eq a => Rhs a -> Rhs a -> [Constraint]
   match r1 r2 = case (r1, r2) of
@@ -343,7 +343,7 @@ isSingleton g = isProductive s (Grammar s ps) && noAlts where
 
 -- | Tests whether the given nonterminal is productive in the given
 -- grammar.
-isProductive :: Name -> Grammar a -> Bool
+isProductive :: Nonterm -> Grammar a -> Bool
 isProductive n g = Set.member n (productive g)
 
 -- | Returns a grammar where the start symbol points to the m-th
@@ -377,22 +377,22 @@ height g = Map.foldr (\rhss acc -> acc + length rhss) 0 ps where
   Grammar _ ps = evalState g 0
 
 -- | Returns the start symbol of the given grammar.
-start :: Grammar a -> Name
+start :: Grammar a -> Nonterm
 start (Grammar s _) = s
 
 -- | Returns the productions of the given grammar.
-productions :: Grammar a -> Map.Map Name [Rhs a]
+productions :: Grammar a -> Map.Map Nonterm [Rhs a]
 productions (Grammar _ ps) = ps
 
 -- | Returns the right hand sides of the given non-terminal symbol in
 -- the given grammar.
-rhs :: Grammar a -> Name -> [Rhs a]
+rhs :: Grammar a -> Nonterm -> [Rhs a]
 rhs (Grammar _ ps) n = fromMaybe [] $ Map.lookup n ps
 
 -- | List the names that occur in a right hand side.
-rhsNames :: Rhs a -> [Name]
-rhsNames (Ctor _ ns) = ns
-rhsNames (Eps n) = [n]
+rhsNonterms :: Rhs a -> [Nonterm]
+rhsNonterms (Ctor _ ns) = ns
+rhsNonterms (Eps n) = [n]
 
 -- | Returns the alphabet over which the given grammar operates.
 alphabet :: (Ord a, Show a) => Grammar a -> Alphabet a
