@@ -229,7 +229,7 @@ dropUnreachable g = do
     f n = do r <- get
              unless (Set.member n r) $ do
                put (Set.insert n r)
-               sequence_ [mapM_ f (rhsNames x) | x <- fromMaybe (error ("Name " ++ show n ++ " not in the grammar")) (Map.lookup n p)]
+               sequence_ [mapM_ f (rhsNames x) | xs <- maybeToList (Map.lookup n p), x <- xs ]
   return $ Grammar s (Map.filterWithKey (\k _ -> Set.member k reachables) p) where
 
 -- | Removes useless productions.
