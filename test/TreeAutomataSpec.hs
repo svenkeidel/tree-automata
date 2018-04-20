@@ -5,6 +5,7 @@ import           Control.Monad
 import           Control.Monad.State hiding (sequence)
 
 import qualified Data.Map as M
+import           Data.Text (Text)
 
 import           TreeAutomata
 
@@ -17,6 +18,19 @@ main = hspec spec
 spec :: Spec
 spec = do
 
+  describe "Subterms" $ do
+    it "should destruct and rebuild PCF" $
+      fromSubterms (toSubterms pcf) `shouldBe` pcf
+
+    it "should destruct and rebuild simple" $
+      fromSubterms (toSubterms simple) `shouldBe` simple
+
+    it "should destruct and rebuild the empty grammar" $
+      fromSubterms (toSubterms (empty::GrammarBuilder Text)) `shouldBe` empty
+
+    it "should destruct and rebuild the infinite grammar into the empty grammar" $ do
+      fromSubterms (toSubterms infinite) `shouldBe` empty
+
   describe "Size" $ do
     it "should be 25 on PCF" $
       size pcf `shouldBe` 25
@@ -28,7 +42,7 @@ spec = do
       size empty `shouldBe` 0
 
     it "should be defined on an infinite grammar" $
-      size infinite `shouldBe` 4
+      size infinite `shouldBe` 2
 
   describe "Height" $ do
     it "should be 11 on PCF" $
@@ -41,7 +55,7 @@ spec = do
       height empty `shouldBe` 0
 
     it "should be defined on an infinite grammar" $
-      height infinite `shouldBe` 2
+      height infinite `shouldBe` 1
 
   describe "Productivity" $ do
     it "should give all nonterminals for PCF" $ do
@@ -69,14 +83,14 @@ spec = do
       map (`isProductive` pcf_simple') ["Start0", "PStart", "S", "A", "G", "F", "Exp", "Type", "Type"] `shouldBe` [True, True, True, True, True, True, True, True, True]
 
     it "should correctly compute that PCF produces Zero, Num and String" $
-      map (\n -> evalState (produces pcf n) 0) ["Zero", "Num", "String", "Succ", "Pred", "Ifz"] `shouldBe` [True, True, True, False, False, False]
+      map (\n -> produces (pcf::GrammarBuilder Text) n) ["Zero", "Num", "String", "Succ", "Pred", "Ifz"] `shouldBe` [True, True, True, False, False, False]
 
     it "should correctly compute that the infinite grammar does not produce \"foo\"" $
-      evalState (produces infinite "foo") 0 `shouldBe` False
+      produces infinite "foo" `shouldBe` False
 
   describe "Emptiness" $ do
     it "should be true on the empty grammar" $
-      isEmpty TreeAutomata.empty `shouldBe` True
+      isEmpty empty `shouldBe` True
 
     it "should be true on the infinite infinite grammar" $
       isEmpty infinite `shouldBe` True
@@ -90,6 +104,24 @@ spec = do
     it "should be false on the subset of PCF" $
       isEmpty pcf_sub `shouldBe` False
 
+  describe "Singletoness" $ do
+    it "should be false on the empty grammar" $
+      isSingleton TreeAutomata.empty `shouldBe` False
+
+    it "should be false on the infinite infinite grammar" $
+      isSingleton infinite `shouldBe` False
+
+    it "should be false on the simple grammar" $
+      isSingleton simple `shouldBe` False
+
+    it "should be false on the PCF grammar" $
+      isSingleton pcf `shouldBe` False
+
+    it "should be true on a singleton grammar" $
+      let g = grammar "Foo" (M.fromList [ ("Foo", [ Ctor ("Bar"::Text) [ "Baz" ] ])
+                                        , ("Baz", [ Ctor ("Baz"::Text) [] ]) ])
+      in isSingleton g `shouldBe` True
+
   describe "Union" $ do
     it "should work on the union of two small grammars" $
       let g1 = grammar "Foo" $ M.fromList [ ("Foo", [ Eps "Exp" ])
@@ -101,13 +133,16 @@ spec = do
                                              , ("Bar", [ Eps "Type" ])
                                              , ("Exp", [ Ctor "Zero" [] ])
                                              , ("Type", [ Ctor "Num" [] ])]
-      in union g1 g2 `shouldBeLiteral` g3
+      in union (g1::GrammarBuilder Text) (g2::GrammarBuilder Text) `shouldBeLiteral` (g3::GrammarBuilder Text)
 
     it "should work on the union of the simple and PCF grammars" $
       union pcf simple `shouldBeLiteral` pcf_simple
 
+    it "should work on the union of the infinite and empty grammars" $
+      union infinite empty `shouldBe` empty
+
     it "the list version should work on an empty list" $
-      union' [] `shouldBe` empty
+      (union' []::GrammarBuilder Text) `shouldBe` empty
 
     it "the list version should work on a singleton list" $
       union' [simple] `shouldBe` (union simple empty)
@@ -153,7 +188,7 @@ spec = do
                                          ,("A'", [ Ctor "g" ["S'"]
                                                  , Ctor "e" []])
                                          ,("B'", [ Ctor "b" []])]
-      in g `subsetOf` g' `shouldBe` True
+      in (g::GrammarBuilder Text) `subsetOf` (g'::GrammarBuilder Text) `shouldBe` True
 
     it "should be true for the PCF grammar and a subset of the PCF grammar" $
       pcf_sub `subsetOf` pcf `shouldBe` True
@@ -173,15 +208,14 @@ spec = do
 
     it "should hold for equal grammars" $ do
       pcf `subsetOf` pcf `shouldBe` True
-      empty `subsetOf` empty `shouldBe` True
+      (empty::GrammarBuilder Text) `subsetOf` (empty::GrammarBuilder Text) `shouldBe` True
 
   describe "Permutation" $ do
     it "should work on the empty grammar" $
-      evalState (permutate empty) 0 `shouldBe` [ grammar "Start0" M.empty ]
+      evalState (permutate (empty::GrammarBuilder Text)) 0 `shouldBe` [ grammar "Start0" M.empty ]
 
-    it "should work on the infinite grammar" $ do
-      let ps = productions (evalState infinite 0)
-      evalState (permutate infinite) 0 `shouldBe` [ infinite, (grammar "foo" ps) ]
+    it "should work on the infinite grammar" $
+      evalState (permutate infinite) 0 `shouldBe` [ infinite ]
 
     it "should work on the simple grammar" $ do
       let ps = productions (evalState simple 0)
@@ -189,8 +223,8 @@ spec = do
 
   describe "Equality" $ do
     it "should be true when comparing the empty grammar" $ do
-      empty == empty `shouldBe` True
-      empty `shouldBe` empty
+      (empty::GrammarBuilder Text) == empty `shouldBe` True
+      (empty::GrammarBuilder Text) `shouldBe` empty
 
     it "should be true when comparing the same grammar" $ do
       pcf == pcf `shouldBe` True
@@ -242,8 +276,7 @@ spec = do
                                                , Ctor "g" [ "A" ]])
                                        , ("H", [ Eps "G" ])
                                        , ("F", [ Ctor "f" [ "G", "H" ]])]
-    infinite = grammar "EStart" $ M.fromList [ ("EStart", [ Eps "foo" ])
-                                             , ("foo", [ Ctor "Bar" ["foo"]])]
+    infinite = grammar "EStart" $ M.fromList [ ("EStart", [ Ctor "Bar" ["EStart"]])]
     pcf = grammar "PStart" $ M.fromList [ ("PStart", [ Eps "Exp"
                                                      , Eps "Type" ])
                                         , ("Exp", [ Ctor "App" ["Exp", "Exp"]
@@ -290,7 +323,7 @@ spec = do
     -- should look like. In fact, this is an even stricter test than
     -- simply comparing grammars using `==`, because we now also
     -- detect spurious non-terminal symbols and production rules.
-    shouldBeLiteral :: GrammarBuilder -> GrammarBuilder -> Expectation
+    shouldBeLiteral :: (Ord a, Show a) => GrammarBuilder a -> GrammarBuilder a -> Expectation
     actual `shouldBeLiteral` expected =
       -- TODO: apparently the order of the right hand sides in the maps matters. For now, just make the right order in the test cases,
       -- but eventually we should implement a custom equality check that does not depend on order.
