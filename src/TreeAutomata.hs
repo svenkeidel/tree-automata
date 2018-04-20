@@ -36,6 +36,7 @@ module TreeAutomata
   , produces
   , subsetOf
   , isEmpty
+  , isSingleton
   , isProductive
   , nthSubterm
   , size
@@ -331,6 +332,14 @@ isEmpty :: GrammarBuilder a -> Bool
 isEmpty g = not (isProductive s g') where
   g' = evalState g 0
   s = start g'
+
+-- | Tests whether the given grammar produces a single term. This can
+-- be tested by checking that every non-terminal symbol has no
+-- alternative productions, and that the start symbol is productive.
+isSingleton :: GrammarBuilder a -> Bool
+isSingleton g = isProductive s (Grammar s ps) && noAlts where
+  Grammar s ps = evalState (normalize (epsilonClosure g)) 0
+  noAlts = and (map (\rhss -> length rhss <= 1) (Map.elems ps))
 
 -- | Tests whether the given nonterminal is productive in the given
 -- grammar.

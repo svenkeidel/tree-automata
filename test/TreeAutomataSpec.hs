@@ -104,6 +104,24 @@ spec = do
     it "should be false on the subset of PCF" $
       isEmpty pcf_sub `shouldBe` False
 
+  describe "Singletoness" $ do
+    it "should be false on the empty grammar" $
+      isSingleton TreeAutomata.empty `shouldBe` False
+
+    it "should be false on the infinite infinite grammar" $
+      isSingleton infinite `shouldBe` False
+
+    it "should be false on the simple grammar" $
+      isSingleton simple `shouldBe` False
+
+    it "should be false on the PCF grammar" $
+      isSingleton pcf `shouldBe` False
+
+    it "should be true on a singleton grammar" $
+      let g = grammar "Foo" (M.fromList [ ("Foo", [ Ctor ("Bar"::Text) [ "Baz" ] ])
+                                        , ("Baz", [ Ctor ("Baz"::Text) [] ]) ])
+      in isSingleton g `shouldBe` True
+
   describe "Union" $ do
     it "should work on the union of two small grammars" $
       let g1 = grammar "Foo" $ M.fromList [ ("Foo", [ Eps "Exp" ])
