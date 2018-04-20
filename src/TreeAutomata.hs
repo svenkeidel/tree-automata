@@ -15,7 +15,7 @@ module TreeAutomata
   , empty
   , singleton
   , grammar
-  , combine
+  , addConstructor
   , wildcard
   , union
   , union'
@@ -127,12 +127,11 @@ grammar s ps = return (Grammar s ps)
 
 -- | Given a non-terminal symbol with n arguments, combines n grammars
 -- into a single new grammar containing this constructor.
-combine :: Eq a => a -> [GrammarBuilder a] -> GrammarBuilder a
-combine n gs = do
+addConstructor :: Eq a => a -> [GrammarBuilder a] -> GrammarBuilder a
+addConstructor n gs = do
   s <- uniqueStart
-  Grammar _ ps <- union' gs
-  ss <- mapM (fmap start) gs
-  return (Grammar s $ Map.insertWith (++) s [ Ctor n ss ] ps)
+  gs' <- sequence gs
+  return (Grammar s $ Map.insertWith (++) s [ Ctor n (map start gs') ] (Map.unionsWith (++) (map productions gs')))
 
 -- | Creates a grammar with all possible terms over a given signature
 wildcard :: Alphabet a -> GrammarBuilder a
