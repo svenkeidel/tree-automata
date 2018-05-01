@@ -395,11 +395,12 @@ rhsNonterms (Ctor _ ns) = ns
 rhsNonterms (Eps n) = [n]
 
 -- | Returns the alphabet over which the given grammar operates.
-alphabet :: (Ord a, Show a) => Grammar a -> Alphabet a
-alphabet (Grammar _ p) = r where
-  r = case filter ((>1) . length) $ groupBy g' ctors of
-    [] -> Map.fromList ctors
-    err -> error ("Inconsistent constructors: " ++ show err)
+alphabet :: (Ord a, Show a) => GrammarBuilder a -> Alphabet a
+alphabet g = Map.fromList ctors where
+  Grammar _ p = evalState g 0
+  -- r = case filter ((>1) . length) $ groupBy g' ctors of
+  --   [] -> Map.fromList ctors
+  --   err -> error ("Inconsistent constructors: " ++ show err)
   ctors = nub $ sort $ concatMap f $ concat $ Map.elems p
   f (Ctor c n) = [(c, length n)]
   f (Eps _) = []
