@@ -57,8 +57,10 @@ import           Data.Either
 import           Data.Hashable
 import           Data.IORef
 import           Data.List hiding (union)
+import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Maybe
+import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.Text (Text)
 import qualified Data.Text as Text
@@ -75,10 +77,10 @@ data Rhs a = Ctor a [Nonterm] | Eps Nonterm deriving (Show, Eq, Ord)
 type Prod a = (Nonterm, Rhs a)
 
 -- The second field of `Grammar` is strict so whnf is enough to get real benchmark numbers
-data Grammar a = Grammar Nonterm !(Map.Map Nonterm [Rhs a])
+data Grammar a = Grammar Nonterm !(Map Nonterm [Rhs a])
 type GrammarBuilder a = State Int (Grammar a)
 
-type Alphabet a = Map.Map a [Arity]
+type Alphabet a = Map a [Arity]
 type Arity = Int
 
 instance Show (Grammar a) => Show (GrammarBuilder a) where
@@ -131,7 +133,7 @@ singleton c = do
   return (Grammar start (Map.fromList [(start, [ Ctor c [] ])]))
 
 -- | Create a grammar with the given start symbol and production rules
-grammar :: Nonterm -> Map.Map Nonterm [Rhs a] -> GrammarBuilder a
+grammar :: Nonterm -> Map Nonterm [Rhs a] -> GrammarBuilder a
 grammar s ps = return (Grammar s ps)
 
 -- | Given a non-terminal symbol with n arguments, combines n grammars
@@ -188,7 +190,7 @@ epsilonClosure g = do
     close name = [r | r@(Ctor _ _) <- concatMap (fromJust . flip Map.lookup p) (reach name)]
     reach :: Nonterm -> [Nonterm]
     reach name = Set.toList $ execState (epsReach name) Set.empty where
-      epsReach :: Nonterm -> State (Set.Set Nonterm) ()
+      epsReach :: Nonterm -> State (Set Nonterm) ()
       epsReach n = do
         r <- get
         unless (Set.member n r) $ do
@@ -215,7 +217,7 @@ dropEmpty g = do
              sortBy (\a b -> snd a `compare` snd b)
              [(l, x) | (l, r) <- Map.toList p, x <- concatMap rhsNonterms r]
     nulls = nub $ sort [l | (l, r) <- Map.toList p, Ctor _ [] <- r]
-    f :: Nonterm -> State (Set.Set Nonterm) ()
+    f :: Nonterm -> State (Set Nonterm) ()
     f n = do r <- get
              unless (Set.member n r) $
                when (any (all (`Set.member` r) . rhsNonterms) (case Map.lookup n p of Just x -> x)) $ do
@@ -229,7 +231,7 @@ dropUnreachable g = do
   Grammar s p <- g
   let
     reachables = execState (f s) Set.empty
-    f :: Nonterm -> State (Set.Set Nonterm) ()
+    f :: Nonterm -> State (Set Nonterm) ()
     f n = do r <- get
              unless (Set.member n r) $ do
                put (Set.insert n r)
@@ -250,17 +252,17 @@ removeUnproductive g = do
   return (Grammar start (Map.filterWithKey (\k _ -> k `Set.member` prodNs) prods))
 
 -- | Returns all productive nonterminals in the given grammar.
-productive :: Grammar a -> Set.Set Nonterm
+productive :: Grammar a -> Set Nonterm
 productive (Grammar _ prods) = execState (go prods) p where
   p = Set.fromList [ n | (n, rhss) <- Map.toList prods, producesConstant rhss]
   producesConstant :: [Rhs a] -> Bool
   producesConstant = isJust . find (\r -> case r of Ctor _ [] -> True; _ -> False)
-  filter :: [Rhs a] -> Set.Set Nonterm -> Bool
+  filter :: [Rhs a] -> Set Nonterm -> Bool
   filter rhss p = case rhss of
     (Ctor _ args : rhss) -> if and (map (`Set.member` p) args) then True else filter rhss p
     (Eps nonterm : rhss) -> if Set.member nonterm p then True else filter rhss p
     [] -> False
-  go :: Map.Map Nonterm [Rhs a] -> State (Set.Set Nonterm) ()
+  go :: Map Nonterm [Rhs a] -> State (Set Nonterm) ()
   go prods = do p <- get
                 let p' = Set.union p $ Set.fromList [ n | (n, rhss) <- Map.toList prods, filter rhss p ]
                 put p'
@@ -292,7 +294,7 @@ produces g n = any (elem n) (Set.map (\p -> [ c | Ctor c [] <- fromJust $ Map.lo
   Grammar s prods = evalState g 0
 
 data Constraint = Constraint (Nonterm, Nonterm) | Trivial Bool deriving (Show)
-type ConstraintSet = Map.Map (Nonterm,Nonterm) [[Constraint]]
+type ConstraintSet = Map (Nonterm,Nonterm) [[Constraint]]
 
 -- | Test whether the first grammar is a subset of the second, i.e. whether
 -- L(g1) ⊆ L(g2).
@@ -304,7 +306,7 @@ g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) wh
   solve pair constraints = case Map.lookup pair constraints of
     Just deps -> and (map or (map (map (\c -> case c of Trivial t -> t; Constraint p -> solve p constraints)) deps))
     Nothing -> True
-  generate :: ConstraintSet -> Set.Set (Nonterm,Nonterm) -> ConstraintSet
+  generate :: ConstraintSet -> Set (Nonterm,Nonterm) -> ConstraintSet
   generate constraints toTest | Set.null toTest = constraints
                               | otherwise = do
                                   let (a1,a2) = Set.elemAt 0 toTest
@@ -385,7 +387,7 @@ start :: Grammar a -> Nonterm
 start (Grammar s _) = s
 
 -- | Returns the productions of the given grammar.
-productions :: Grammar a -> Map.Map Nonterm [Rhs a]
+productions :: Grammar a -> Map Nonterm [Rhs a]
 productions (Grammar _ ps) = ps
 
 -- | Returns the right hand sides of the given non-terminal symbol in
@@ -490,27 +492,27 @@ subst1 n1 n2 (Grammar s p) = Grammar (substS n1 n2 s) (Map.fromList p') where
   substR n1 n2 (Eps s) = Eps (substS n1 n2 s)
   substR n1 n2 (Ctor c ns) = Ctor c (map (substS n1 n2) ns)
 
-eqvClasses' :: Map.Map Int Name -> Map.Map Int [(Int, [Int])] -> Map.Map Int{-old name-} Int{-new name-}
+eqvClasses' :: Map Int Name -> Map Int [(Int, [Int])] -> Map Int{-old name-} Int{-new name-}
 eqvClasses' nameInv p = iter f init where
   ps@(p0 : _) = sort (Map.keys p)
   pList = Map.toList p
-  init :: Map.Map Int Int
+  init :: Map Int Int
   initBasic = Map.fromList [(p, p0) | p <- ps]
   init = Map.fromList $ concatMap h $ Map.elems init1
   h ns@(n : _) = [(n', n) | n' <- ns]
-  init0 :: Map.Map Int{-size-} [Int]
+  init0 :: Map Int{-size-} [Int]
   init0 = Map.fromListWith (++) [(length rhs, [n]) | (n, rhs) <- Map.toList p]
-  init1 :: Map.Map [Int]{-ctors-} [Int]
+  init1 :: Map [Int]{-ctors-} [Int]
   init1 = Map.fromListWith (++) [(nub $ sort $ map fst rhs, [n]) | (n, rhs) <- Map.toList p]
-  f :: Map.Map Int Int -> Map.Map Int Int -- name |-> repesentitive name
+  f :: Map Int Int -> Map Int Int -- name |-> repesentitive name
   f eqvs = {-trace ("eqvClasses':\n"++unlines [Map.findWithDefault (error "eqvClass'") i nameInv ++ " -> " ++ Map.findWithDefault (error "eqvClasses'") j nameInv | (i, j) <- Map.toList eqvs])-} result where
-    inv :: Map.Map [(Int, [Int])] [Int{-old name-}] -- [(ctor, [nt])] |-> member names
+    inv :: Map [(Int, [Int])] [Int{-old name-}] -- [(ctor, [nt])] |-> member names
     inv = foldr (uncurry (Map.insertWith (++)) . renameProds) Map.empty pList
     renameProds :: (Int, [(Int, [Int])]) -> ([(Int, [Int])], [Int])
     renameProds (n, rhs) = (map renameProd rhs, [n])
     renameProd (c, args) = (c, map renameName args)
     renameName i = Map.findWithDefault (error "eqvClasses'") i eqvs
-    result :: Map.Map Int Int
+    result :: Map Int Int
     result = Map.fromList $ concatMap entries (Map.elems inv)
     entries [n] = [(n, n)]
     entries ns@(n : _) = [(n', n) | n' <- ns]
@@ -539,13 +541,13 @@ eqvClasses (Grammar s p) = Grammar sFinal pFinal where
   mapRhs (Ctor c args) = (mapCtor c, map mapName args)
   mapEntry (n, rhs) = (mapName n, map mapRhs rhs)
 
-  p' :: Map.Map Int [(Int, [Int])]
+  p' :: Map Int [(Int, [Int])]
   p' = {-trace ("\n\n\npEps:\n"++pp (Grammar sEps pEps)++"\n\n\n") $-} Map.fromList (map mapEntry (Map.toList pEps))
 
-  renaming :: Map.Map Int{-old name-} Int{-new name-}
+  renaming :: Map Int{-old name-} Int{-new name-}
   renaming = eqvClasses' nameInv p'
 
-  renamingInv :: Map.Map Int{-new name-} [Int]{-old name-}
+  renamingInv :: Map Int{-new name-} [Int]{-old name-}
   renamingInv = foldr (uncurry (Map.insertWith (++)) . (\(n,n') -> (n', [n]))) Map.empty (Map.toList renaming)
 
   renameName :: Name -> Name
@@ -584,17 +586,17 @@ elimSingles = iter (elimSingleUse . elimSingleCtor . elimSingleEps)
 -- elimSingleEps2 :: Grammar -> Grammar
 -- elimSingleEps2 (Grammar s p) = Grammar s' p' where
 --   -- initial mappings from single epsilons
---   subst :: Map.Map Name Name
+--   subst :: Map Name Name
 --   subst = Map.fromList [(n, n') | (n, [Eps n']) <- Map.toList p]
 --   -- union find algorithm
---   flatten :: [Name] -> Map.Map Name Name -> Map.Map Name Name
+--   flatten :: [Name] -> Map Name Name -> Map Name Name
 --   flatten [] m = m
 --   flatten (n : ns) m = flatten ns (flatten' n [] m) where
 --     flatten' n ns m
 --       | Just n' <- Map.lookup n m = flatten' n' (n:ns) m
 --       | otherwise = foldr (\n' -> Map.insert n' n) m ns
 --   -- transitive closure of subst
---   subst' :: Map.Map Name Name
+--   subst' :: Map Name Name
 --   subst' = flatten (Map.keys subst) subst
 --   renameName n = Map.findWithDefault n n subst'
 --   renameRhs (Ctor c args) = Ctor c (map renameName args)
@@ -677,7 +679,7 @@ data Prods = Prods
   [(Name, Prods)] -- Given an additional argument, keep traversing down the tree with each Prods
   deriving (Ord, Eq, Show)
 
-makeProds :: Map.Map Name [Rhs] -> Prods
+makeProds :: Map Name [Rhs] -> Prods
 makeProds m = go prods0 where
   prods0 :: [([Name], (Ctor, Name))]
   prods0 = [ (children, (c, n))
@@ -720,15 +722,15 @@ determinize2 (Grammar s m) =
   
   prods0 :: Prods
   prods0 = makeProds m
-  loop :: [Set.Set Name] -> Grammar --[([Set.Set Name], [(Ctor, Set.Set Name)])]
+  loop :: [Set Name] -> Grammar --[([Set Name], [(Ctor, Set Name)])]
   loop ss0 = if length ss0 == length ss1
              then Grammar s' (Map.fromList (startEdges ++ res3))
              else loop ss1 where
 
-    res :: [([Set.Set Name], [(Ctor, Name)])]
+    res :: [([Set Name], [(Ctor, Name)])]
     res = chooseS [] [prods0]
 
-    res2 :: [([Set.Set Name], [(Ctor, Set.Set Name)])]
+    res2 :: [([Set Name], [(Ctor, Set Name)])]
     res2 = mapSnd (mapSnd Set.fromList . factorFst) res
 
     newNt n = "{" ++ intercalate "," (sort $ Set.toList n) ++ "}"
@@ -745,14 +747,14 @@ determinize2 (Grammar s m) =
 
     ss1 = nub $ sort [s | (_, cn) <- res2, (_, s) <- cn]
 
-    chooseS :: [Set.Set Name] -> [Prods] -> [([Set.Set Name], [(Ctor, Name)])]
+    chooseS :: [Set Name] -> [Prods] -> [([Set Name], [(Ctor, Name)])]
     chooseS ss prods =
       (case self of (_, []) -> []; _ -> [self]) ++
       (case prods of [] -> []; _ -> r) where
-      self :: ([Set.Set Name], [(Ctor, Name)])
+      self :: ([Set Name], [(Ctor, Name)])
       self = (ss, nub $ sort $ concat [c | Prods c _ <- prods])
       children :: [(Name, Prods)]
       children = concat [c | Prods _ c <- prods]
-      r :: [([Set.Set Name], [(Ctor, Name)])]
+      r :: [([Set Name], [(Ctor, Name)])]
       r = concat [chooseS (ss ++ [s]) (map snd (filter ((`elem` s) . fst) children)) | s <- ss0]
 -}
