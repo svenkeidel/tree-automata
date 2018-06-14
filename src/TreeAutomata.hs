@@ -30,7 +30,6 @@ module TreeAutomata
   , dedup
   , removeUnproductive
   , productive
-  , permutate
   , toSubterms
   , fromSubterms
 
@@ -267,13 +266,6 @@ productive (Grammar _ prods) = execState (go prods) p where
                 let p' = Set.union p $ Set.fromList [ n | (n, rhss) <- Map.toList prods, filter rhss p ]
                 put p'
                 if p == p' then return () else go prods
-
--- | Returns a list of grammars, where each grammar has a non-terminal
--- symbol from the given grammar as start symbol.
-permutate :: GrammarBuilder a -> State Int [GrammarBuilder a]
-permutate g = do
-   Grammar _ ps <- g
-   return (map (\n -> return (Grammar n ps)) (Map.keys ps))
 
 -- | Destructs a grammar into a list of (N, [G]) tuples where N is a
 -- non-terminal and [G] is a list of grammars, with each grammar G in

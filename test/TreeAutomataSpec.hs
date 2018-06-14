@@ -210,17 +210,6 @@ spec = do
       pcf `subsetOf` pcf `shouldBe` True
       (empty::GrammarBuilder Text) `subsetOf` (empty::GrammarBuilder Text) `shouldBe` True
 
-  describe "Permutation" $ do
-    it "should work on the empty grammar" $
-      evalState (permutate (empty::GrammarBuilder Text)) 0 `shouldBe` [ grammar "Start0" M.empty ]
-
-    it "should work on the infinite grammar" $
-      evalState (permutate infinite) 0 `shouldBe` [ infinite ]
-
-    it "should work on the simple grammar" $ do
-      let ps = productions (evalState simple 0)
-      evalState (permutate simple) 0 `shouldBe` [ (grammar "A" ps), (grammar "F" ps), (grammar "G" ps), simple ]
-
   describe "Equality" $ do
     it "should be true when comparing the empty grammar" $ do
       (empty::GrammarBuilder Text) == empty `shouldBe` True
