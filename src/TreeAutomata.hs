@@ -71,7 +71,6 @@ import           System.IO.Unsafe
 
 import           Util
 
-type Ctor = Text -- Tree-constructor labels
 type Nonterm = Text -- Non-terminal names
 data Rhs a = Ctor a [Nonterm] | Eps Nonterm deriving (Show, Eq, Ord)
 type Prod a = (Nonterm, Rhs a)
@@ -498,39 +497,6 @@ eqLength (_:as) (_:bs) = eqLength as bs
 eqLength _ _ = False
 
 {-
--- | Test the equality of two regular tree grammars
-eqGrammar :: Grammar -> Grammar -> Either String ()
-eqGrammar g1 g2 = eqGrammar' (epsilonClosure g1) (epsilonClosure g2)
-
--- | Test equality without doing epsilon closure first
-eqGrammar' :: Grammar -> Grammar -> Either String ()
-eqGrammar' (Grammar s1 ps1) (Grammar s2 ps2) = fst (head rs)
-  where
-  rs = runStateT (runExceptT (f s1 s2)) []
-  f :: Name -> Name -> ExceptT String (StateT [(Name, Name)] []) ()
-  f s1 s2 = do
-    mapping <- get
-    case lookup s1 mapping of
-      Just s1' | s1' == s2 -> return ()
-               | otherwise -> throwError $ "Name already assigned: " ++ show (s1, s1', s2)
-      Nothing -> do
-                    put ((s1, s2) : mapping)
-                    let p1 = sort $ map (s1,) $ fromJust $ Map.lookup s1 ps1
-                        p2 = sort $ map (s2,) $ fromJust $ Map.lookup s2 ps2
-                    if length p1 /= length p2
-                    then throwError $ "Different number of productions: " ++ unlines (map show p1) ++ unlines (map show p2)
-                    else do let {-p1' = [p | p@(_, Ctor _ _) <- p1] ++ [p | p@(_, Eps _) <- p1]-}
-                            p2' <- lift $ lift $ map ([p | p@(_, Ctor _ _) <- p2]++) $ permutations [p | p@(_, Eps _) <- p2]
-                            zipWithM_ g p1 p2'
-  g :: Prod -> Prod -> ExceptT String (StateT [(Name, Name)] []) ()
-  g (l1, Ctor c1 p1) (l2, Ctor c2 p2)
-      | c1 /= c2 = throwError $ "Mismatched ctors: " ++ show (l1, Ctor c1 p1, l2, Ctor c2 p2)
-      | otherwise = zipWithM_ f p1 p2
-  g (l1, Eps n1) (l2, Eps n2) = f n1 n2
-  g p1 p2 = throwError $ "Mismatched prods: " ++ show (p1, p2)
--}
-
-{-
 introduceEpsilons :: Grammar -> Grammar
 introduceEpsilons g = Grammar start $ Map.mapWithKey go prodMap where
   Grammar start prodMap  = shrink $ epsilonClosure g
@@ -710,44 +676,6 @@ elimSingleUse (Grammar s p) = normalize (Grammar s (Map.map replaceSingleUse p))
   useCountProd n (Ctor _ rhs)
     | n `elem` rhs = 2 -- Use 2 since it can't be inlined
     | otherwise = 0
--}
-
-{-
--- NOTE: assumes (1) no epsilons, (2) fixed arity labels, and (3) that tokens are identical for identical labels
-determinize :: Grammar -> Grammar
-determinize (Grammar s m) = result where
-  -- First we group the productions by label
-  --prodInits :: [(l, [(nt, [nt])])]
-  --prodInits = mkProdInits (smapToList m)
-  -- Next we loop until the qInit set stablizes
-  loop :: Set (Set Name) -> [(Set Name, Rhs (Set Name) Ctor (Set Name))]
-  loop qInit = if qInit == qInit' then prods' else loop qInit' where
-    -- The next iteration of productions
-    prods' :: [(Set Name, Rhs (Set Name) l (Set Name))]
-    prods' = concatMap (uncurry rec0) prodInits
-    -- The non-terminal names for that next iteration of productions
-    qInit' :: Set (Set Name)
-    qInit' = Set.fromList (map fst prods')
-    -- The function that calculates the next iteration of productions for a given label (l)
-    rec0 :: l -> [(nt, [nt])] -> [(Set Name, Rhs (Set Name) l (Set Name))]
-    rec0 l prodInit = rec [] prodInit where
-      -- Arguments:
-      --   - Atoms already checked for this set of productions
-      --   - The atoms left to be checked in a production along with the non-terminal for that production
-      rec :: [Set Name] -> [(Name, [Name])] -> [(Set Name, Rhs (Set Name) l (Set Name))]
-      rec qs [] = [] -- No productions match the selected qs
-      rec qs prods
-        -- end of label so return an answer
-        | (_, []) <- head prods = [(Set.fromList (map fst prods), Seq l qs)]
-        -- pick a set of q for the next atom and try each one that works
-        | otherwise = concat [rec (qs ++ [q']) (filtermap (filterProd q') prods) | q' <- Set.toList qInit]
-  -- The preductions for the new grammar
-  finalProds :: [(Set Name, Rhs (Set Name) l (Set Name))]
-  finalProds = loop Set.empty
-  -- productions for the start non-terminal
-  s' :: Set (Set Name)
-  s' = Set.fromList [qs | (qs, rhs) <- finalProds, not (Set.null (s `Set.intersection` qs))]
-  result = Grammar s' (smapFromList finalProds)
 
 -- Prods is a radix tree on the arguments to a constructor
 data Prods = Prods
