@@ -340,32 +340,50 @@ subsetOf :: Eq a => GrammarBuilder a -> GrammarBuilder a -> Bool
 g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) where
   Grammar s1 p1 = evalState (epsilonClosure g1) 0
   Grammar s2 p2 = evalState (epsilonClosure g2) 0
+  -- Solves the generated set of constraints.
   solve :: (Nonterm, Nonterm) -> ConstraintSet -> Bool
   solve pair constraints = case Map.lookup pair constraints of
-    Just deps -> and (map or (map (map (\c -> case c of Trivial t -> t; Constraint p -> solve p constraints)) deps))
+    Just deps -> all (any (\dep -> case dep of Trivial t -> t; Constraint p -> solve p constraints)) deps
     Nothing -> True
+  -- Generate constraints of the form S ⊆ S' iff (A⊆A' ∨ A⊆B') ∧ (B⊆A' ∨ B⊆B') ∧ (True)
+  -- for two production rules S -> foo(A) | foo(B) | c and S' -> foo(A') | foo(B') | c. This constraint is stored in a
+  -- ConstraintSet with key (S,S') and value [[Constraint ("A","A'"),Constraint ("A","B'")],...]. False results are
+  -- skipped as an optimization.
   generate :: ConstraintSet -> Set (Nonterm,Nonterm) -> ConstraintSet
-  generate constraints toTest | Set.null toTest = constraints
-                              | otherwise = do
-                                  let (a1,a2) = Set.elemAt 0 toTest
-                                      toTest' = Set.deleteAt 0 toTest
-                                      dependencies = map (map (\c -> case c of
-                                                                  Trivial t -> Trivial t
-                                                                  Constraint pair -> if pair `elem` Map.keys constraints || pair == (a1,a2)
-                                                                                     then Trivial True
-                                                                                     else Constraint pair)) $ shareCtor a1 a2
-                                      constraints' = if not (null dependencies)
-                                        then Map.insert (a1,a2) dependencies constraints
-                                        else constraints
-                                      toTest'' = Set.union toTest' (Set.fromList [ (a1,a2) | pairs <- dependencies, Constraint (a1,a2) <- pairs, not $ elem (a1,a2) (Map.keys constraints') ])
-                                  generate constraints' toTest''
+  generate constraints toTest = if Set.null toTest
+    then constraints
+    else let
+      (a1,a2) = Set.elemAt 0 toTest
+      toTest' = Set.deleteAt 0 toTest
+      dependencies = map (map (\c -> case c of
+                                  Trivial t -> Trivial t
+                                  Constraint pair -> if pair `elem` Map.keys constraints || pair == (a1,a2)
+                                    then Trivial True
+                                    else Constraint pair)) $ shareCtor a1 a2
+      -- Insert dependencies into the map, regardless of whether there are any. Empty dependencies
+      -- are taken care of properly by `solve`.
+      constraints' = Map.insert (a1,a2) dependencies constraints
+      -- Insert any untested pair (a,b) into toTest.
+      toTest'' = foldl (foldl (\toTest dep -> case dep of
+                           Constraint pair | pair `notElem` Map.keys constraints' -> Set.insert pair toTest
+                           _ -> toTest)) toTest' dependencies
+    in generate constraints' toTest''
+  -- Given two nonterminals, e.g. S -> foo(A) | foo(B) | c and S' -> foo(A') | foo(B') | c, this function pairs
+  -- all constructors creating constraints of the form [[A⊆A' ∨ A⊆B' ∨ False],[B⊆A' ∨ B⊆B' ∨ False],[False ∨ False ∨ True].
+  -- As an optimization, False results are skipped entirely, creating instead [[A⊆A' ∨ A⊆B'],[B⊆A' ∨ B⊆B'],[True]
   shareCtor :: Nonterm -> Nonterm -> [[Constraint]]
-  shareCtor a1 a2 = [ [ r | r2s <- maybeToList $ Map.lookup a2 p2, r2 <- r2s, r <- match r1 r2 ] | r1s <- maybeToList $ Map.lookup a1 p1, r1 <- r1s ]
+  shareCtor a1 a2 = [ [ r | r2 <- p2 Map.! a2, r <- match r1 r2 ] | r1 <- p1 Map.! a1 ]
+  -- Given two constructors, this function creates the actual constraints:
+  -- 1. If two constants are identical, i.e. c and c from the example above, this is trivially true.
+  -- 2. If two constructors `foo` are found of equal arity, the constraint is formed pair-wise of their subterms.
+  -- 3. If none of these cases apply, then this is trivially false. As an optimization, false results are not actually
+  --    inserted in the list but rather skipped entirely.
   match :: Eq a => Rhs a -> Rhs a -> [Constraint]
   match r1 r2 = case (r1, r2) of
-    (Ctor c args, Ctor c' args') | c == c' && length args == length args' -> if length args > 0 then zipWith (\a1 a2 -> Constraint (a1,a2)) args args' else [Trivial True]
-    (Eps e, Eps e') | e == e' -> [Constraint (e,e')]
-    _ -> [Trivial False]
+    (Ctor c []  , Ctor c' []   ) | c == c' -> [Trivial True]
+    (Ctor c args, Ctor c' args') | c == c' && eqLength args args' -> zipWith (\a1 a2 -> Constraint (a1,a2)) args args'
+    (Eps e      , Eps e'       ) -> [Constraint (e,e')]
+    _                            -> [Trivial False]
 
 -- | Test whether the given grammar generates the empty language.  In
 -- regular tree automata, emptiness can be tested by computing whether
@@ -473,6 +491,11 @@ uniqueNt :: State Int Text
 uniqueNt = do
   x <- fresh
   return $ Text.pack ("Nt" ++ show x)
+
+eqLength :: [a] -> [b] -> Bool
+eqLength [] [] = True
+eqLength (_:as) (_:bs) = eqLength as bs
+eqLength _ _ = False
 
 {-
 -- | Test the equality of two regular tree grammars
