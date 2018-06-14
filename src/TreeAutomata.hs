@@ -46,6 +46,7 @@ module TreeAutomata
   , productions
   , rhs
   , alphabet
+  , isDeterministic
   ) where
 
 import           Control.DeepSeq
@@ -446,6 +447,16 @@ alphabet g = Map.foldl go Map.empty p where
   go acc (n:ns) = case n of
     Ctor c n -> go (Map.insert c [length n] acc) ns
     Eps _ -> go acc ns
+
+-- | Checks if the given grammar is deterministic. A deterministic
+-- grammar has no production rules of the form X -> foo(A) | foo(A').
+isDeterministic :: Eq a => GrammarBuilder a -> Bool
+isDeterministic g = all (\rhss -> eqLength (nubBy determinicity rhss) rhss) (Map.elems m) where
+  -- Nondeterminism may hide in unproductive or unreachable production rules, so we remove those first.
+  Grammar _ m = evalState (removeUnproductive (normalize (epsilonClosure g))) 0
+  determinicity :: Eq a => Rhs a -> Rhs a -> Bool
+  determinicity (Ctor c args) (Ctor c' args') = c == c' && eqLength args args'
+  determinicity _ _ = False
 
 fresh :: State Int Int
 fresh = do
