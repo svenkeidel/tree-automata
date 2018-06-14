@@ -12,6 +12,8 @@ import           TreeAutomata
 import           Test.Hspec
 import           Test.HUnit
 
+import Debug.Trace
+
 main :: IO ()
 main = hspec spec
 
@@ -23,8 +25,8 @@ spec = do
       pendingWith "infinite"
       -- fromSubterms (toSubterms pcf) `shouldBe` pcf
 
-    it "should destruct and rebuild simple" $
-      fromSubterms (toSubterms simple) `shouldBe` simple
+    it "should destruct and rebuild a nondeterministic grammar" $
+      fromSubterms (toSubterms nondet) `shouldBe` nondet
 
     it "should destruct and rebuild the empty grammar" $
       fromSubterms (toSubterms (empty::GrammarBuilder Text)) `shouldBe` empty
@@ -36,8 +38,8 @@ spec = do
     it "should be 25 on PCF" $
       size pcf `shouldBe` 25
 
-    it "should be 10 on simple" $
-      size simple `shouldBe` 10
+    it "should be 10 on nondet" $
+      size nondet `shouldBe` 10
 
     it "should be 0 on the empty grammar" $
       size empty `shouldBe` 0
@@ -49,8 +51,8 @@ spec = do
     it "should be 11 on PCF" $
       height pcf `shouldBe` 11
 
-    it "should be 5 on simple" $
-      height simple `shouldBe` 5
+    it "should be 5 on nondet" $
+      height nondet `shouldBe` 5
 
     it "should be 0 on the empty grammar" $
       height empty `shouldBe` 0
@@ -67,21 +69,21 @@ spec = do
       let infinite' = evalState infinite 0
       map (`isProductive` infinite') ["foo", "EStart"] `shouldBe` [False, False]
 
-    it "should give all nonterminals for simple" $ do
-      let simple'' = evalState simple 0
-      map (`isProductive` simple'') ["S", "A", "G", "F"] `shouldBe` [True, True, True, True]
+    it "should give all nonterminals for a nondeterministic grammar" $ do
+      let nondet'' = evalState nondet 0
+      map (`isProductive` nondet'') ["S", "A", "G", "F"] `shouldBe` [True, True, True, True]
 
-    it "should give all nonterminals for simple'" $ do
-      let simple''' = evalState simple' 0
-      map (`isProductive` simple''') ["S", "A", "G", "H", "F"] `shouldBe` [True, True, True, True, True]
+    it "should give all nonterminals for nondet'" $ do
+      let nondet''' = evalState nondet' 0
+      map (`isProductive` nondet''') ["S", "A", "G", "H", "F"] `shouldBe` [True, True, True, True, True]
 
     it "should give all nonterminals for the PCF subset" $ do
       let pcf_sub' = evalState pcf_sub 0
       map (`isProductive` pcf_sub') ["PSStart", "Exp", "Type"] `shouldBe` [True, True, True]
 
-    it "should give all nonterminals for the union of PCF and simple" $ do
-      let pcf_simple' = evalState pcf_simple 0
-      map (`isProductive` pcf_simple') ["Nt0", "Nt1", "Nt2", "Nt3", "Nt4", "Nt5"] `shouldBe` [True, True, True, True, True, True]
+    it "should give all nonterminals for the union of PCF and a nondeterministic grammar" $ do
+      let pcf_nondet' = evalState pcf_nondet 0
+      map (`isProductive` pcf_nondet') ["Nt0", "Nt1", "Nt2", "Nt3", "Nt4", "Nt5"] `shouldBe` [True, True, True, True, True, True]
 
     it "should correctly compute that PCF produces Zero, Num and String" $
       map (\n -> produces (pcf::GrammarBuilder Text) n) ["Zero", "Num", "String", "Succ", "Pred", "Ifz"] `shouldBe` [True, True, True, False, False, False]
@@ -96,8 +98,8 @@ spec = do
     it "should be true on the infinite infinite grammar" $
       isEmpty infinite `shouldBe` True
 
-    it "should be false on the simple grammar" $
-      isEmpty simple `shouldBe` False
+    it "should be false on the nondeterministic grammar" $
+      isEmpty nondet `shouldBe` False
 
     it "should be false on the PCF grammar" $
       isEmpty pcf `shouldBe` False
@@ -112,8 +114,8 @@ spec = do
     it "should be false on the infinite infinite grammar" $
       isSingleton infinite `shouldBe` False
 
-    it "should be false on the simple grammar" $
-      isSingleton simple `shouldBe` False
+    it "should be false on the nondeterministic grammar" $
+      isSingleton nondet `shouldBe` False
 
     it "should be false on the PCF grammar" $
       isSingleton pcf `shouldBe` False
@@ -133,8 +135,8 @@ spec = do
                                                     , Ctor "Num" [] ])]
       in union (g1::GrammarBuilder Text) (g2::GrammarBuilder Text) `shouldBeLiteral` (g3::GrammarBuilder Text)
 
-    it "should work on the union of the simple and PCF grammars" $
-      union pcf simple `shouldBeLiteral` pcf_simple
+    it "should work on the union of the nondeterministic and PCF grammars" $
+      union pcf nondet `shouldBeLiteral` pcf_nondet
 
     it "should work on the union of the infinite and empty grammars" $
       union infinite empty `shouldBeLiteral` empty
@@ -142,20 +144,20 @@ spec = do
     it "should produce the same language when taken over identical grammars (PCF)" $ do
       union pcf pcf `shouldBe` pcf
 
-    it "should produce the same language when taken over identical grammars (simple)" $ do
-      union simple simple `shouldBe` simple
+    it "should produce the same language when taken over identical grammars (nondet)" $ do
+      union nondet nondet `shouldBe` nondet
 
     it "the list version should work on an empty list" $
       (union' []::GrammarBuilder Text) `shouldBeLiteral` empty
 
     it "the list version should work on a singleton list" $
-      union' [simple] `shouldBeLiteral` (union simple empty)
+      union' [nondet] `shouldBeLiteral` (union nondet empty)
 
     it "the list version should work on a list with two elements" $
-      union' [simple, pcf] `shouldBeLiteral` (union simple (union pcf empty))
+      union' [nondet, pcf] `shouldBeLiteral` (union nondet (union pcf empty))
 
     it "the list version should work on a list with three elements" $
-      union' [simple, pcf, infinite] `shouldBeLiteral` (union simple (union pcf (union infinite empty)))
+      union' [nondet, pcf, infinite] `shouldBeLiteral` (union nondet (union pcf (union infinite empty)))
 
   describe "Intersection" $ do
     it "of a subset of the PCF grammar should be that subset" $
@@ -172,11 +174,11 @@ spec = do
                                                                              , Ctor "Fun" [ "Type⨯Type", "Type⨯Type" ]])])
 
     it "should give an empty grammar if the arguments have no intersection" $ do
-      intersection simple pcf `shouldBeLiteral` (grammar "S⨯PStart" M.empty)
+      intersection nondet pcf `shouldBeLiteral` (grammar "S⨯PStart" M.empty)
 
     it "should give an empty grammar when one of the arguments is an empty grammar" $ do
-      intersection simple infinite `shouldBeLiteral` (grammar "S⨯EStart" M.empty)
-      intersection infinite simple `shouldBeLiteral` (grammar "EStart⨯S" M.empty)
+      intersection nondet infinite `shouldBeLiteral` (grammar "S⨯EStart" M.empty)
+      intersection infinite nondet `shouldBeLiteral` (grammar "EStart⨯S" M.empty)
 
   describe "Inclusion" $ do
     it "should work for the worked out example" $
@@ -203,16 +205,22 @@ spec = do
     it "reflexivity should hold on PCF" $
       pcf `subsetOf` pcf `shouldBe` True
 
-    it "reflexivity should hold on simple" $
-      simple `subsetOf` simple `shouldBe` True
+    it "reflexivity should hold on the nondeterministic grammar" $
+      nondet `subsetOf` nondet `shouldBe` True
 
     it "should not hold for languages that do not intersect" $ do
-      simple `subsetOf` pcf `shouldBe` False
-      pcf `subsetOf` simple `shouldBe` False
+      nondet `subsetOf` pcf `shouldBe` False
+      pcf `subsetOf` nondet `shouldBe` False
 
     it "should hold for equal grammars" $ do
       pcf `subsetOf` pcf `shouldBe` True
       (empty::GrammarBuilder Text) `subsetOf` (empty::GrammarBuilder Text) `shouldBe` True
+
+    it "should work for a nondeterministic grammar" $
+      let det = grammar "Nt0" $ M.fromList [ ("Nt0", [ Ctor "f" ["Nt1","Nt1"]])
+                                           , ("Nt1", [ Ctor "g" ["Nt2"]])
+                                           , ("Nt2", [ Ctor "a" [], Ctor "g" ["Nt2"]])]
+      in det `subsetOf` nondet `shouldBe` True
 
   describe "Equality" $ do
     it "should be true when comparing the empty grammar" $ do
@@ -223,21 +231,21 @@ spec = do
       pcf == pcf `shouldBe` True
       pcf `shouldBe` pcf
 
-    it "should be true when comparing the same grammar (simple)" $ do
-      simple == simple `shouldBe` True
-      simple `shouldBe` simple
+    it "should be true when comparing the same grammar (nondet)" $ do
+      nondet == nondet `shouldBe` True
+      nondet `shouldBe` nondet
 
     it "should be false when comparing different grammars" $ do
-      pcf == simple `shouldBe` False
-      pcf `shouldNotBe` simple
+      pcf == nondet `shouldBe` False
+      pcf `shouldNotBe` nondet
 
     it "should be true when comparing different grammars producing the same language" $ do
-      simple == simple' `shouldBe` True
-      simple `shouldBe` simple'
+      nondet == nondet' `shouldBe` True
+      nondet `shouldBe` nondet'
 
   describe "Integration tests" $ do
-    it "union idempotence should hold for simple" $
-      union simple simple `shouldBe` simple
+    it "union idempotence should hold for the nondeterministic grammar" $
+      union nondet nondet `shouldBe` nondet
 
     it "union idempotence should hold for PCF" $
       union pcf pcf `shouldBe` pcf
@@ -246,29 +254,51 @@ spec = do
       intersection pcf pcf_sub `shouldBe` pcf_sub
 
     it "union absorption should hold" $
-      union pcf (intersection pcf simple) `shouldBe` pcf
+      union pcf (intersection pcf nondet) `shouldBe` pcf
 
     it "intersection idempotence should hold for PCF" $
       intersection pcf pcf `shouldBe` pcf
 
-    it "intersection idempotence should hold for simple" $
-      intersection simple simple `shouldBe` simple
+    it "intersection idempotence should hold for the nondeterministic grammar" $
+      intersection nondet nondet `shouldBe` nondet
 
     it "intersection absorption should hold" $
-      intersection pcf (union pcf simple) `shouldBe` pcf
+      intersection pcf (union pcf nondet) `shouldBe` pcf
 
   describe "Alphabet" $ do
     it "should correctly list the alphabet of PCF" $
       let a = M.fromList [("App", [2]), ("Abs", [3]), ("Zero", [0]), ("Succ", [1]), ("Pred", [1]), ("Ifz", [3]), ("Num", [0]), ("Fun", [2]), ("String", [0])]
       in alphabet pcf `shouldBe` a
 
+  describe "Determinization" $ do
+    it "should correctly determinize PCF" $ do
+      let det = determinize pcf
+      isDeterministic det `shouldBe` True
+      det `shouldBe` pcf
+
+    it "should correctly determinize the nondeterministic grammar" $ do
+      let det = determinize nondet
+      isDeterministic nondet `shouldBe` False
+      isDeterministic det `shouldBe` True
+      trace ("Det: " ++ show det) (det `shouldBe` nondet)
+
+    it "should correctly determinize the infinite grammar" $ do
+      let det = determinize infinite
+      isDeterministic det `shouldBe` True
+      det `shouldBe` infinite
+
+    it "should correctly determinize the empty grammar" $ do
+      let det = determinize (empty::GrammarBuilder Text)
+      isDeterministic det `shouldBe` True
+      det `shouldBe` empty
+
   where
-    simple = grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
+    nondet = grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
                                       , ("A", [ Ctor "a" [] ])
                                       , ("G", [ Ctor "g" [ "G" ]
                                               , Ctor "g" [ "A" ]])
                                       , ("F", [ Ctor "f" [ "G", "G" ]])]
-    simple' = grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
+    nondet' = grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
                                        , ("A", [ Ctor "a" [] ])
                                        , ("G", [ Ctor "g" [ "G" ]
                                                , Ctor "g" [ "A" ]])
@@ -293,7 +323,7 @@ spec = do
                                                        , Ctor "Zero" []])
                                              , ("Type", [ Ctor "Num" []
                                                         , Ctor "Fun" ["Type", "Type"]])]
-    pcf_simple = grammar "Nt0" $ M.fromList [ ("Nt5", [ Ctor "g" ["Nt5"]
+    pcf_nondet = grammar "Nt0" $ M.fromList [ ("Nt5", [ Ctor "g" ["Nt5"]
                                                       , Ctor "a" []])
                                             , ("Nt4", [ Ctor "g" ["Nt5"]])
                                             , ("Nt3", [ Ctor "Zero" []

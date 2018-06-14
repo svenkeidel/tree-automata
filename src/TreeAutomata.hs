@@ -32,6 +32,7 @@ module TreeAutomata
   , productive
   , toSubterms
   , fromSubterms
+  , determinize
 
   -- Queries
   , produces
@@ -94,7 +95,7 @@ instance (Ord a, Show a) => Show (Grammar a) where
       g lhs (Ctor c ns) = Text.unpack lhs ++ " → " ++ show c ++ "(" ++ Text.unpack (Text.intercalate ", " ns) ++ ")"
       g lhs (Eps n) = Text.unpack lhs ++ " → " ++ Text.unpack n
 
-instance Eq a => Eq (GrammarBuilder a) where
+instance Ord a => Eq (GrammarBuilder a) where
   g1 == g2 = g1 `subsetOf` g2 && g2 `subsetOf` g1
 
 deriving instance NFData a => NFData (GrammarBuilder a)
@@ -335,9 +336,9 @@ type ConstraintSet = Map (Nonterm,Nonterm) [[Constraint]]
 
 -- | Test whether the first grammar is a subset of the second, i.e. whether
 -- L(g1) ⊆ L(g2).
-subsetOf :: Eq a => GrammarBuilder a -> GrammarBuilder a -> Bool
+subsetOf :: Ord a => GrammarBuilder a -> GrammarBuilder a -> Bool
 g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) where
-  Grammar s1 p1 = evalState (epsilonClosure g1) 0
+  Grammar s1 p1 = evalState (epsilonClosure (determinize g1)) 0
   Grammar s2 p2 = evalState (epsilonClosure g2) 0
   -- Solves the generated set of constraints.
   solve :: (Nonterm, Nonterm) -> ConstraintSet -> Bool
@@ -676,24 +677,20 @@ elimSingleUse (Grammar s p) = normalize (Grammar s (Map.map replaceSingleUse p))
   useCountProd n (Ctor _ rhs)
     | n `elem` rhs = 2 -- Use 2 since it can't be inlined
     | otherwise = 0
+-}
 
 -- Prods is a radix tree on the arguments to a constructor
-data Prods = Prods
-  [(Ctor, Name)] -- Given no more arguments, this is the constructors and the non-terminals to which they belong
-  [(Name, Prods)] -- Given an additional argument, keep traversing down the tree with each Prods
+data Prods a = Prods
+  [(a, Nonterm)] -- Given no more arguments, this is the constructors and the non-terminals to which they belong
+  [(Nonterm, Prods a)] -- Given an additional argument, keep traversing down the tree with each Prods
   deriving (Ord, Eq, Show)
 
-makeProds :: Map Name [Rhs] -> Prods
+makeProds :: Ord a => Map Nonterm [Rhs a] -> Prods a
 makeProds m = go prods0 where
-  prods0 :: [([Name], (Ctor, Name))]
-  prods0 = [ (children, (c, n))
-           | (n, rs) <- Map.toList m,
-             Ctor c children <- rs]
-  go :: [([Name], (Ctor, Name))] -> Prods
-  go prods =
-    Prods
-    (concat [ctorAndName | Left ctorAndName <- fac])
-    [(head, go rest) | Right (head, rest) <- fac] where
+  -- prods0 :: Ord a => [([Nonterm], (a, Nonterm))]
+  prods0 = [ (children, (c, nt)) | (nt, rhss) <- Map.toList m, Ctor c children <- rhss]
+  -- go :: Ord a => [([Nonterm], (a, a))] -> Prods a
+  go prods = Prods (concat [ctorAndName | Left ctorAndName <- fac]) [(head, go rest) | Right (head, rest) <- fac] where
     fac = factorFstHead (sort prods)
 
 factorFst :: (Ord (a, b), Eq a) => [(a, b)] -> [(a, [b])]
@@ -720,45 +717,36 @@ maybeHead :: [a] -> Maybe a
 maybeHead [] = Nothing
 maybeHead (x : _) = Just x
 
-determinize2 :: Grammar -> Grammar
-determinize2 (Grammar s m) =
-  loop [] where
-  
-  prods0 :: Prods
-  prods0 = makeProds m
-  loop :: [Set Name] -> Grammar --[([Set Name], [(Ctor, Set Name)])]
-  loop ss0 = if length ss0 == length ss1
-             then Grammar s' (Map.fromList (startEdges ++ res3))
-             else loop ss1 where
+determinize :: Ord a => GrammarBuilder a -> GrammarBuilder a
+determinize g | not (isDeterministic g) = g
+              | otherwise = do
+  Grammar s m <- epsilonClosure g
+  s' <- uniqueStart
+  let
+      -- newNt :: Set Nonterm -> Text
+      newNt n = ('{' `Text.cons` Text.intercalate (Text.singleton ',') (sort $ Set.toList n) `Text.snoc` '}')
 
-    res :: [([Set Name], [(Ctor, Name)])]
-    res = chooseS [] [prods0]
-
-    res2 :: [([Set Name], [(Ctor, Set Name)])]
-    res2 = mapSnd (mapSnd Set.fromList . factorFst) res
-
-    newNt n = "{" ++ intercalate "," (sort $ Set.toList n) ++ "}"
-
-    res3 :: [(Name, [Rhs])]
-    res3 =
-      factorFst
-      [ (newNt nt, Ctor c (map newNt args)) | (args, cnts) <- res2, (c, nt) <- cnts]
-
-    startEdges :: [(Name, [Rhs])]
-    startEdges = [(s', [Eps (newNt n) | n <- ss0, s `elem` n])]
-
-    s' = "det:start"
-
-    ss1 = nub $ sort [s | (_, cn) <- res2, (_, s) <- cn]
-
-    chooseS :: [Set Name] -> [Prods] -> [([Set Name], [(Ctor, Name)])]
-    chooseS ss prods =
-      (case self of (_, []) -> []; _ -> [self]) ++
-      (case prods of [] -> []; _ -> r) where
-      self :: ([Set Name], [(Ctor, Name)])
-      self = (ss, nub $ sort $ concat [c | Prods c _ <- prods])
-      children :: [(Name, Prods)]
-      children = concat [c | Prods _ c <- prods]
-      r :: [([Set Name], [(Ctor, Name)])]
-      r = concat [chooseS (ss ++ [s]) (map snd (filter ((`elem` s) . fst) children)) | s <- ss0]
--}
+      -- loop :: Ord a => [Set Nonterm] -> GrammarBuilder a
+      loop ss0 = if length ss0 == length ss1
+        then return (Grammar s' (Map.fromList (startEdges ++ res3)))
+        else loop ss1 where
+          ss1 = nub $ sort [s | (_, cn) <- res2, (_, s) <- cn]
+          startEdges :: [(Nonterm, [Rhs a])]
+          startEdges = [(s', [Eps (newNt n) | n <- ss0, s `elem` n])]
+          chooseS :: Ord a => [Set Nonterm] -> [Prods a] -> [([Set Nonterm], [(a, Nonterm)])]
+          chooseS ss prods =
+            (case self of (_, []) -> []; _ -> [self]) ++
+            (case prods of [] -> []; _ -> r) where
+            -- self :: ([Set Nonterm], [(a, Nonterm)])
+            self = (ss, nub $ sort $ concat [c | Prods c _ <- prods])
+            -- children :: [(Nonterm, Prods a)]
+            children = concat [c | Prods _ c <- prods]
+            -- r :: [([Set Nonterm], [(a, Nonterm)])]
+            r = concat [chooseS (ss ++ [s]) (map snd (filter ((`elem` s) . fst) children)) | s <- ss0]
+          -- res :: Ord a => [([Set.Set Nonterm], [(a, Nonterm)])]
+          -- res = chooseS [] [makeProds m]
+          -- res2 :: Ord a => [([Set Nonterm], [(a, Set Nonterm)])]
+          res2 = mapSnd (mapSnd Set.fromList . factorFst) (chooseS [] [makeProds m])
+          -- res3 :: Ord a => [(Nonterm, [Rhs a])]
+          res3 = factorFst [ (newNt nt, Ctor c (map newNt args)) | (args, cnts) <- res2, (c, nt) <- cnts]
+  loop []
