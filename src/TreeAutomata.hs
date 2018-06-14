@@ -149,20 +149,65 @@ wildcard ctxt = do
   start <- uniqueStart
   return (Grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, is) <- Map.toList ctxt, i <- is])]))
 
+type RenameMap = Map ([Nonterm],[Nonterm]) Nonterm
+type ProdMap a = Map Nonterm [Rhs a]
+
 -- | Union of two grammars. A new, unique start symbol is automatically created.
 -- If either of the grammars is empty, the other is returned as-is.
-union :: Eq a => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
-union g1 g2 | isEmpty g1 = g2
-            | isEmpty g2 = g1
-            | otherwise = do
-                Grammar start1 prods1 <- g1
-                Grammar start2 prods2 <- g2
-                start <- uniqueStart
-                return (Grammar start (Map.insert start (nub [Eps start1, Eps start2]) $ Map.unionWith (\r1 r2 -> nub $ r1 ++ r2) prods1 prods2))
+union :: Ord a => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
+union g1 g2
+ | isEmpty g1 = g2
+ | isEmpty g2 = g1
+ | otherwise = do
+     -- This merges equal parts of the grammars, to prevent largely
+     -- duplicated production rules in the resulting union.
+     g1' <- epsilonClosure g1
+     g2' <- epsilonClosure g2
+     (ps,rmap) <- go [start g1'] [start g2'] g1' g2' Map.empty Map.empty
+     return (Grammar (rmap Map.! ([start g1'],[start g2'])) ps)
+ where
+   go :: Ord a => [Nonterm] -> [Nonterm] -> Grammar a -> Grammar a -> ProdMap a -> RenameMap -> State Int (ProdMap a, RenameMap)
+   go ns1 ns2 g1@(Grammar _ p1) g2@(Grammar _ p2) res rmap = case Map.lookup (ns1,ns2) rmap of
+     Just n -> return (res,rmap)
+     Nothing -> do
+       n <- uniqueNt
+       let rmap' = Map.insert (ns1,ns2) n rmap
+       -- N1  -> foo(A1 ,B1 ) | bar(B1)                               in G1
+       -- N1' -> foo(A1',B1') | biz(B1')                              in G1
+       -- N2  -> foo(A2, B2) | baz(B2)                                in G2
+       -- N1xN1'xN2 -> foo(A1xA1'xA2, B1xB1'xB2) | bar(B1) | bar(B2)  in G3
+       let prods = Map.fromListWith (\(ns1,ns2) (ns1',ns2') -> (ns1 ++ ns1', ns2 ++ ns2'))
+                   $ map fromCtor
+                   $ concat [ Left <$> p1 Map.! n1 | n1 <- ns1 ] ++ concat [ Right <$> p2 Map.! n2 | n2 <- ns2 ]
+       foldM (\(ps,rmap) (c,(s1,s2)) -> case (transpose s1, transpose s2) of
+                 -- TODO: clean up code duplication
+                 (s1,[]) -> do
+                   (ps',rmap') <- foldM (\(ps,rmap) ns1 -> go ns1 [] g1 g2 ps rmap) (ps,rmap) s1
+                   let subterms = map (\ns -> rmap' Map.! (ns,[])) s1
+                   return (Map.insertWith (++) n [(Ctor c subterms)] ps',rmap')
+                 ([],s2) -> do
+                   (ps',rmap') <- foldM (\(ps,rmap) ns2 -> go [] ns2 g1 g2 ps rmap) (ps,rmap) s2
+                   let subterms = map (\ns -> rmap' Map.! ([],ns)) s2
+                   return (Map.insertWith (++) n [(Ctor c subterms)] ps',rmap')
+                 (s1,s2) -> do
+                   -- Transpose reorders the subterms by columns so they can be
+                   -- merged. Look at the example of `foo`.
+                   -- transpose [ [A1,B1], [A1',B1'] ] == [ [A1,A1'], [B1,B1'] ]
+                   -- transpose [ [A2,B2]            ] == [ [A2]    , [B2]     ]
+                   let ss = zip s1 s2
+                   (ps',rmap') <- foldM (\(ps,rmap) (ns1,ns2) -> go ns1 ns2 g1 g2 ps rmap) (ps,rmap) ss
+                   let subterms = map (rmap' Map.!) ss
+                   return (Map.insertWith (++) n [(Ctor c subterms)] ps',rmap')
+             ) (res,rmap') (Map.toList prods)
+   fromCtor :: Either (Rhs a) (Rhs a) -> (a,([[Nonterm]],[[Nonterm]]))
+   fromCtor (Left (Ctor c ns)) = (c,([ns],[]))
+   fromCtor (Right (Ctor c ns)) = (c,([],[ns]))
+   -- TODO: can we properly treat epsilon rules?
+   fromCtor _ = error "epsilon"
 
 -- | Union of a list of grammars. This simply iterates over the list,
 -- using `union` on each pair and `empty` for the base case.
-union' :: Eq a => [GrammarBuilder a] -> GrammarBuilder a
+union' :: Ord a => [GrammarBuilder a] -> GrammarBuilder a
 union' = foldr union empty
 
 -- | Returns the intersection of the two given grammars.
@@ -277,7 +322,7 @@ toSubterms (epsilonClosure -> b) =
 
 -- | The opposite of `toSubterms`, i.e., given such a list of tuples,
 -- rebuilds the original grammar.
-fromSubterms :: Eq a =>  [(a, [GrammarBuilder a])] -> GrammarBuilder a
+fromSubterms :: Ord a =>  [(a, [GrammarBuilder a])] -> GrammarBuilder a
 fromSubterms = epsilonClosure . foldr (\(c, gs) g -> union (addConstructor c gs) g) empty
 
 -- | Returns true iff the grammar can construct the given constant.
@@ -412,6 +457,11 @@ uniqueStart :: State Int Text
 uniqueStart = do
   x <- fresh
   return $ Text.pack ("Start" ++ show x)
+
+uniqueNt :: State Int Text
+uniqueNt = do
+  x <- fresh
+  return $ Text.pack ("Nt" ++ show x)
 
 {-
 -- | Test the equality of two regular tree grammars
