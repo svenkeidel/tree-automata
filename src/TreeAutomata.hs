@@ -313,9 +313,12 @@ productive (Grammar _ prods) = execState (go prods) p where
                 put p'
                 if p == p' then return () else go prods
 
--- | Destructs a grammar into a list of (N, [G]) tuples where N is a
--- non-terminal and [G] is a list of grammars, with each grammar G in
--- this tuple having a subterm of N as start symbol.
+-- | Destructs a grammar into a list of (c, [G]) tuples where c is a
+-- constructor and [G] is a list of grammars, with each grammar G in
+-- this tuple having as constructor a nonterminal from c as start symbol.
+-- For example, for the start production S -> foo(A,B) | bar(C) this returns
+-- [(foo,[grammar with A as start symbol, grammar with B as start symbol])
+-- ,(bar,[grammar with C as start symbol])]
 toSubterms :: GrammarBuilder a -> [(a,[GrammarBuilder a])]
 toSubterms (epsilonClosure -> b) =
   let Grammar s ps = evalState b 0
@@ -324,7 +327,7 @@ toSubterms (epsilonClosure -> b) =
 -- | The opposite of `toSubterms`, i.e., given such a list of tuples,
 -- rebuilds the original grammar.
 fromSubterms :: Ord a =>  [(a, [GrammarBuilder a])] -> GrammarBuilder a
-fromSubterms = epsilonClosure . foldr (\(c, gs) g -> union (addConstructor c gs) g) empty
+fromSubterms = foldr (\(c, gs) g -> union (dedup (dropUnreachable (addConstructor c gs))) g) empty
 
 -- | Returns true iff the grammar can construct the given constant.
 produces :: Ord a => GrammarBuilder a -> a -> Bool

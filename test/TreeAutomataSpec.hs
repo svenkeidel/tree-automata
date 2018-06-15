@@ -21,18 +21,21 @@ spec :: Spec
 spec = do
 
   describe "Subterms" $ do
-    it "should destruct and rebuild PCF" $
-      pendingWith "infinite"
-      -- fromSubterms (toSubterms pcf) `shouldBe` pcf
+    it "should destruct and rebuild PCF" $ do
+      let pcf' = fromSubterms (toSubterms pcf)
+      isDeterministic pcf' `shouldBe` True
+      pcf' `shouldBe` pcf
 
-    it "should destruct and rebuild a nondeterministic grammar" $
-      fromSubterms (toSubterms nondet) `shouldBe` nondet
+    it "should destruct and rebuild a nondeterministic grammar" $ do
+      let nondet'' = fromSubterms (toSubterms nondet)
+      isDeterministic nondet'' `shouldBe` False
+      nondet'' `shouldBe` nondet
 
     it "should destruct and rebuild the empty grammar" $
-      fromSubterms (toSubterms (empty::GrammarBuilder Text)) `shouldBe` empty
+      fromSubterms (toSubterms (empty::GrammarBuilder Text)) `shouldBeLiteral` empty
 
     it "should destruct and rebuild the infinite grammar into the empty grammar" $ do
-      fromSubterms (toSubterms infinite) `shouldBe` empty
+      fromSubterms (toSubterms infinite) `shouldBeLiteral` empty
 
   describe "Size" $ do
     it "should be 25 on PCF" $
