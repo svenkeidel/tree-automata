@@ -13,7 +13,6 @@ module TreeAutomata
   , Arity
 
   -- Constructions
-  , empty
   , singleton
   , grammar
   , addConstructor

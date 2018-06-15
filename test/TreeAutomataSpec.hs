@@ -31,11 +31,8 @@ spec = do
       isDeterministic nondet'' `shouldBe` False
       nondet'' `shouldBe` nondet
 
-    it "should destruct and rebuild the empty grammar" $
-      fromSubterms (toSubterms (empty::GrammarBuilder Text)) `shouldBeLiteral` empty
-
     it "should destruct and rebuild the infinite grammar into the empty grammar" $ do
-      fromSubterms (toSubterms infinite) `shouldBeLiteral` empty
+      isEmpty (fromSubterms (toSubterms infinite)) `shouldBe` True
 
   describe "Size" $ do
     it "should be 25 on PCF" $
@@ -43,9 +40,6 @@ spec = do
 
     it "should be 10 on nondet" $
       size nondet `shouldBe` 10
-
-    it "should be 0 on the empty grammar" $
-      size empty `shouldBe` 0
 
     it "should be defined on an infinite grammar" $
       size infinite `shouldBe` 2
@@ -56,9 +50,6 @@ spec = do
 
     it "should be 5 on nondet" $
       height nondet `shouldBe` 5
-
-    it "should be 0 on the empty grammar" $
-      height empty `shouldBe` 0
 
     it "should be defined on an infinite grammar" $
       height infinite `shouldBe` 1
@@ -95,9 +86,6 @@ spec = do
       produces infinite "foo" `shouldBe` False
 
   describe "Emptiness" $ do
-    it "should be true on the empty grammar" $
-      isEmpty empty `shouldBe` True
-
     it "should be true on the infinite infinite grammar" $
       isEmpty infinite `shouldBe` True
 
@@ -111,9 +99,6 @@ spec = do
       isEmpty pcf_sub `shouldBe` False
 
   describe "Singletoness" $ do
-    it "should be false on the empty grammar" $
-      isSingleton TreeAutomata.empty `shouldBe` False
-
     it "should be false on the infinite infinite grammar" $
       isSingleton infinite `shouldBe` False
 
@@ -141,9 +126,6 @@ spec = do
     it "should work on the union of the nondeterministic and PCF grammars" $
       union pcf nondet `shouldBeLiteral` pcf_nondet
 
-    it "should work on the union of the infinite and empty grammars" $
-      union infinite empty `shouldBeLiteral` empty
-
     it "should produce the same language when taken over identical grammars (PCF)" $ do
       union pcf pcf `shouldBe` pcf
 
@@ -151,16 +133,16 @@ spec = do
       union nondet nondet `shouldBe` nondet
 
     it "the list version should work on an empty list" $
-      (union' []::GrammarBuilder Text) `shouldBeLiteral` empty
+      isEmpty (union' []::GrammarBuilder Text) `shouldBe` True
 
     it "the list version should work on a singleton list" $
-      union' [nondet] `shouldBeLiteral` (union nondet empty)
+      union' [nondet] `shouldBeLiteral` nondet
 
     it "the list version should work on a list with two elements" $
-      union' [nondet, pcf] `shouldBeLiteral` (union nondet (union pcf empty))
+      union' [nondet, pcf] `shouldBeLiteral` (union nondet pcf)
 
     it "the list version should work on a list with three elements" $
-      union' [nondet, pcf, infinite] `shouldBeLiteral` (union nondet (union pcf (union infinite empty)))
+      union' [nondet, pcf, infinite] `shouldBeLiteral` (union nondet (union pcf infinite))
 
   describe "Intersection" $ do
     it "of a subset of the PCF grammar should be that subset" $
@@ -217,7 +199,7 @@ spec = do
 
     it "should hold for equal grammars" $ do
       pcf `subsetOf` pcf `shouldBe` True
-      (empty::GrammarBuilder Text) `subsetOf` (empty::GrammarBuilder Text) `shouldBe` True
+      nondet `subsetOf` nondet `shouldBe` True
 
     it "should work for a nondeterministic grammar" $
       let det = grammar "Nt0" $ M.fromList [ ("Nt0", [ Ctor "f" ["Nt1","Nt1"]])
@@ -226,10 +208,6 @@ spec = do
       in det `subsetOf` nondet `shouldBe` True
 
   describe "Equality" $ do
-    it "should be true when comparing the empty grammar" $ do
-      (empty::GrammarBuilder Text) == empty `shouldBe` True
-      (empty::GrammarBuilder Text) `shouldBe` empty
-
     it "should be true when comparing the same grammar" $ do
       pcf == pcf `shouldBe` True
       pcf `shouldBe` pcf
@@ -289,11 +267,6 @@ spec = do
       let det = determinize infinite
       isDeterministic det `shouldBe` True
       det `shouldBe` infinite
-
-    it "should correctly determinize the empty grammar" $ do
-      let det = determinize (empty::GrammarBuilder Text)
-      isDeterministic det `shouldBe` True
-      det `shouldBe` empty
 
   where
     nondet = grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
