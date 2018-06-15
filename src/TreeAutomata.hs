@@ -3,9 +3,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE ViewPatterns #-}
 module TreeAutomata
   ( GrammarBuilder
   , Grammar
@@ -29,24 +27,25 @@ module TreeAutomata
   , normalize
   , dedup
   , removeUnproductive
-  , productive
   , toSubterms
   , fromSubterms
   , determinize
 
   -- Queries
+  , productive
   , produces
   , subsetOf
-  , isEmpty
-  , isSingleton
-  , isProductive
   , nthSubterm
   , size
   , height
   , start
   , productions
-  , rhs
   , alphabet
+
+  -- Predicates
+  , isEmpty
+  , isSingleton
+  , isProductive
   , isDeterministic
   ) where
 
@@ -72,52 +71,56 @@ import           System.IO.Unsafe
 
 import           Util
 
-type Nonterm = Text -- Non-terminal names
-data Rhs a = Ctor a [Nonterm] | Eps Nonterm deriving (Show, Eq, Ord)
-type Prod a = (Nonterm, Rhs a)
+type Nonterm = Text
+data Rhs a = Ctor a [Nonterm] | Eps Nonterm deriving (Eq, Ord)
 
--- The second field of `Grammar` is strict so whnf is enough to get real benchmark numbers
-data Grammar a = Grammar Nonterm !(Map Nonterm [Rhs a])
-type GrammarBuilder a = State Int (Grammar a)
+instance Show a => Show (Rhs a) where
+  show (Ctor c ns) = show c ++ "(" ++ Text.unpack (Text.intercalate ", " ns) ++ ")"
+  show (Eps e) = Text.unpack e
 
-type Alphabet a = Map a [Arity]
-type Arity = Int
-
-instance Show (Grammar a) => Show (GrammarBuilder a) where
-  show g = show (evalState g 0)
-
-instance (Ord a, Show a) => Show (Grammar a) where
-  show (Grammar start prods) = "start: " ++ Text.unpack start ++ "\n" ++ concatMap f (sort $ Map.toList prods)
-    where
-      f :: (Ord a, Show a) => (Text, [Rhs a]) -> String
-      f (lhs, rhs) = unlines (map (g lhs) $ sort rhs)
-      g :: Show a => Text -> Rhs a -> String
-      g lhs (Ctor c ns) = Text.unpack lhs ++ " → " ++ show c ++ "(" ++ Text.unpack (Text.intercalate ", " ns) ++ ")"
-      g lhs (Eps n) = Text.unpack lhs ++ " → " ++ Text.unpack n
-
-instance Ord a => Eq (GrammarBuilder a) where
-  g1 == g2 = g1 `subsetOf` g2 && g2 `subsetOf` g1
-
-deriving instance NFData a => NFData (GrammarBuilder a)
-
--- TODO: Naming context in grammar
-instance NFData a => NFData (Grammar a) where
-  rnf (Grammar s p) = rnf s `seq` rnf p
 instance NFData a => NFData (Rhs a) where
   rnf (Ctor c ns) = rnf c `seq` rnf ns
   rnf (Eps n) = rnf n
 
-instance Hashable a => Hashable (GrammarBuilder a) where
-  hashWithSalt s g = hashWithSalt s (evalState g 0)
+instance Hashable a => Hashable (Rhs a) where
+  hashWithSalt s (Ctor ctor args) = s `hashWithSalt` (0::Int) `hashWithSalt` ctor `hashWithSalt` args
+  hashWithSalt s (Eps name) = s `hashWithSalt` (1::Int) `hashWithSalt` name
+
+-- The second field of `Grammar` is strict so whnf is enough to get real benchmark numbers
+data Grammar a = Grammar Nonterm !(Map Nonterm [Rhs a])
+
+instance (Ord a, Show a) => Show (Grammar a) where
+  show (Grammar start prods) = "start: " ++ Text.unpack start ++ "\n" ++ concatMap f (Map.toAscList prods)
+    where
+      f :: (Ord a, Show a) => (Nonterm, [Rhs a]) -> String
+      f (lhs, rhs) = unlines (map (g lhs) $ sort rhs)
+      g :: Show a => Nonterm -> Rhs a -> String
+      g lhs rhs = Text.unpack lhs ++ " → " ++ show rhs
+
+-- TODO: Naming context in grammar
+instance NFData a => NFData (Grammar a) where
+  rnf (Grammar s p) = rnf s `seq` rnf p
 
 instance Hashable a => Hashable (Grammar a) where
   hashWithSalt s (Grammar start prods) = s `hashWithSalt` (0::Int) `hashWithSalt` start `hashWithSalt` prods'
     where
       prods' = Map.foldrWithKey (\k v hash -> hash `hashWithSalt` k `hashWithSalt` v) (1::Int) prods
 
-instance Hashable a => Hashable (Rhs a) where
-  hashWithSalt s (Ctor ctor args) = s `hashWithSalt` (0::Int) `hashWithSalt` ctor `hashWithSalt` args
-  hashWithSalt s (Eps name) = s `hashWithSalt` (1::Int) `hashWithSalt` name
+type GrammarBuilder a = State Int (Grammar a)
+
+instance Show (Grammar a) => Show (GrammarBuilder a) where
+  show g = show (evalState g 0)
+
+instance Ord a => Eq (GrammarBuilder a) where
+  g1 == g2 = g1 `subsetOf` g2 && g2 `subsetOf` g1
+
+deriving instance NFData a => NFData (GrammarBuilder a)
+
+instance Hashable a => Hashable (GrammarBuilder a) where
+  hashWithSalt s g = hashWithSalt s (evalState g 0)
+
+type Alphabet a = Map a [Arity]
+type Arity = Int
 
 -- | Empty regular tree grammar
 empty :: GrammarBuilder a
@@ -296,6 +299,23 @@ removeUnproductive g = do
   prodNs <- fmap productive g
   return (Grammar start (Map.filterWithKey (\k _ -> k `Set.member` prodNs) prods))
 
+-- | Destructs a grammar into a list of (c, [G]) tuples where c is a
+-- constructor and [G] is a list of grammars, with each grammar G in
+-- this tuple having as constructor a nonterminal from c as start symbol.
+-- For example, for the start production S -> foo(A,B) | bar(C) this returns
+-- [(foo,[grammar with A as start symbol, grammar with B as start symbol])
+-- ,(bar,[grammar with C as start symbol])]
+toSubterms :: GrammarBuilder a -> [(a,[GrammarBuilder a])]
+toSubterms g =
+  let g' = epsilonClosure g
+      Grammar s ps = evalState g' 0
+  in [ (c,[nthSubterm n m g' | (_,m) <- zip ts [0..]]) | (Ctor c ts,n) <- zip (fromMaybe [] (Map.lookup s ps)) [0..] ]
+
+-- | The opposite of `toSubterms`, i.e., given such a list of tuples,
+-- rebuilds the original grammar.
+fromSubterms :: Ord a =>  [(a, [GrammarBuilder a])] -> GrammarBuilder a
+fromSubterms = foldr (\(c, gs) g -> union (dedup (dropUnreachable (addConstructor c gs))) g) empty
+
 -- | Returns all productive nonterminals in the given grammar.
 productive :: Grammar a -> Set Nonterm
 productive (Grammar _ prods) = execState (go prods) p where
@@ -313,25 +333,9 @@ productive (Grammar _ prods) = execState (go prods) p where
                 put p'
                 if p == p' then return () else go prods
 
--- | Destructs a grammar into a list of (c, [G]) tuples where c is a
--- constructor and [G] is a list of grammars, with each grammar G in
--- this tuple having as constructor a nonterminal from c as start symbol.
--- For example, for the start production S -> foo(A,B) | bar(C) this returns
--- [(foo,[grammar with A as start symbol, grammar with B as start symbol])
--- ,(bar,[grammar with C as start symbol])]
-toSubterms :: GrammarBuilder a -> [(a,[GrammarBuilder a])]
-toSubterms (epsilonClosure -> b) =
-  let Grammar s ps = evalState b 0
-  in [ (c,[nthSubterm n m b | (_,m) <- zip ts [0..]]) | (Ctor c ts,n) <- zip (fromMaybe [] (Map.lookup s ps)) [0..] ]
-
--- | The opposite of `toSubterms`, i.e., given such a list of tuples,
--- rebuilds the original grammar.
-fromSubterms :: Ord a =>  [(a, [GrammarBuilder a])] -> GrammarBuilder a
-fromSubterms = foldr (\(c, gs) g -> union (dedup (dropUnreachable (addConstructor c gs))) g) empty
-
 -- | Returns true iff the grammar can construct the given constant.
 produces :: Ord a => GrammarBuilder a -> a -> Bool
-produces g n = any (elem n) (Set.map (\p -> [ c | Ctor c [] <- fromJust $ Map.lookup p prods]) (productive (Grammar s prods))) where
+produces g n = any (elem n) (Set.map (\p -> [ c | Ctor c [] <- prods Map.! p]) (productive (Grammar s prods))) where
   Grammar s prods = evalState g 0
 
 data Constraint = Constraint (Nonterm, Nonterm) | Trivial Bool deriving (Show)
@@ -388,29 +392,6 @@ g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) wh
     (Eps e      , Eps e'       ) -> [Constraint (e,e')]
     _                            -> [Trivial False]
 
--- | Test whether the given grammar generates the empty language.  In
--- regular tree automata, emptiness can be tested by computing whether
--- any reachable state is a finite state. In a regular tree grammar,
--- this comes down to computing whether the start symbol is
--- productive.
-isEmpty :: GrammarBuilder a -> Bool
-isEmpty g = not (isProductive s g') where
-  g' = evalState g 0
-  s = start g'
-
--- | Tests whether the given grammar produces a single term. This can
--- be tested by checking that every non-terminal symbol has no
--- alternative productions, and that the start symbol is productive.
-isSingleton :: GrammarBuilder a -> Bool
-isSingleton g = isProductive s (Grammar s ps) && noAlts where
-  Grammar s ps = evalState (normalize (epsilonClosure g)) 0
-  noAlts = and (map (\rhss -> length rhss <= 1) (Map.elems ps))
-
--- | Tests whether the given nonterminal is productive in the given
--- grammar.
-isProductive :: Nonterm -> Grammar a -> Bool
-isProductive n g = Set.member n (productive g)
-
 -- | Returns a grammar where the start symbol points to the m-th
 -- subterm of the n-th production of the original start symbol.
 -- If either index is out of bounds, the original grammar is returned.
@@ -428,13 +409,13 @@ nthSubterm n m g = do
 
 -- | The size of a regular tree grammar is defined as SUM_(A∈N)(SUM_(A→α) |Aα|).
 size :: GrammarBuilder a -> Int
-size g = Map.foldr (\rhss acc -> foldr (\rhs acc -> 1 + sizeRhs rhs acc) acc rhss) 0 ps where
+size g = Map.foldr (\rhss acc -> foldr (\rhs acc -> 1 + sizeRhs rhs + acc) acc rhss) 0 ps where
   Grammar _ ps = evalState g 0
 
 -- | The size of a right hand side.
-sizeRhs :: Rhs a -> Int -> Int
-sizeRhs (Ctor _ args) acc = acc + length args
-sizeRhs (Eps _) acc = acc + 1
+sizeRhs :: Rhs a -> Int
+sizeRhs (Ctor _ args) = length args
+sizeRhs (Eps _) = 1
 
 -- | The height of a regular tree grammar is defined as the number of production rules.
 height :: GrammarBuilder a -> Int
@@ -448,11 +429,6 @@ start (Grammar s _) = s
 -- | Returns the productions of the given grammar.
 productions :: Grammar a -> Map Nonterm [Rhs a]
 productions (Grammar _ ps) = ps
-
--- | Returns the right hand sides of the given non-terminal symbol in
--- the given grammar.
-rhs :: Grammar a -> Nonterm -> [Rhs a]
-rhs (Grammar _ ps) n = fromMaybe [] $ Map.lookup n ps
 
 -- | List the names that occur in a right hand side.
 rhsNonterms :: Rhs a -> [Nonterm]
@@ -468,6 +444,29 @@ alphabet g = Map.foldl go Map.empty p where
   go acc (n:ns) = case n of
     Ctor c n -> go (Map.insert c [length n] acc) ns
     Eps _ -> go acc ns
+
+-- | Test whether the given grammar generates the empty language.  In
+-- regular tree automata, emptiness can be tested by computing whether
+-- any reachable state is a finite state. In a regular tree grammar,
+-- this comes down to computing whether the start symbol is
+-- productive.
+isEmpty :: GrammarBuilder a -> Bool
+isEmpty g = not (isProductive s g') where
+  g' = evalState g 0
+  s = start g'
+
+-- | Tests whether the given grammar produces a single term. This can
+-- be tested by checking that every non-terminal symbol has no
+-- alternative productions, and that the start symbol is productive.
+isSingleton :: GrammarBuilder a -> Bool
+isSingleton g = isProductive s (Grammar s ps) && noAlts where
+  Grammar s ps = evalState (normalize (epsilonClosure g)) 0
+  noAlts = all (\rhss -> length rhss <= 1) (Map.elems ps)
+
+-- | Tests whether the given nonterminal is productive in the given
+-- grammar.
+isProductive :: Nonterm -> Grammar a -> Bool
+isProductive n g = Set.member n (productive g)
 
 -- | Checks if the given grammar is deterministic. A deterministic
 -- grammar has no production rules of the form X -> foo(A) | foo(A').
