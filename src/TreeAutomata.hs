@@ -18,7 +18,6 @@ module TreeAutomata
   , addConstructor
   , wildcard
   , union
-  , union'
   , intersection
 
   -- Transformations
@@ -121,12 +120,6 @@ instance Hashable a => Hashable (GrammarBuilder a) where
 type Alphabet a = Map a [Arity]
 type Arity = Int
 
--- | Empty regular tree grammar
-empty :: GrammarBuilder a
-empty = do
-  start <- uniqueStart
-  return $ Grammar start (Map.fromList [(start, [])])
-
 -- | Creates a grammar with a single production from the start symbol
 -- to the given constant.
 singleton :: a -> GrammarBuilder a
@@ -207,11 +200,6 @@ union g1 g2
    fromCtor (Right (Ctor c ns)) = (c,([],[ns]))
    -- TODO: can we properly treat epsilon rules?
    fromCtor _ = error "epsilon"
-
--- | Union of a list of grammars. This simply iterates over the list,
--- using `union` on each pair and `empty` for the base case.
-union' :: Ord a => [GrammarBuilder a] -> GrammarBuilder a
-union' = foldr union empty
 
 -- | Returns the intersection of the two given grammars.
 -- The intersection is taken by taking the cross products of 1)
@@ -313,7 +301,14 @@ toSubterms g =
 -- | The opposite of `toSubterms`, i.e., given such a list of tuples,
 -- rebuilds the original grammar.
 fromSubterms :: Ord a =>  [(a, [GrammarBuilder a])] -> GrammarBuilder a
-fromSubterms = foldr (\(c, gs) g -> union (dedup (dropUnreachable (addConstructor c gs))) g) empty
+fromSubterms [] = empty where
+  empty :: GrammarBuilder a
+  empty = do
+    start <- uniqueStart
+    return $ Grammar start Map.empty
+fromSubterms ((c,gs):xs) = foldr (\(c, gs) g -> union (addConstructor' c gs) g) (addConstructor' c gs) xs where
+  addConstructor' :: Ord a => a -> [GrammarBuilder a] -> GrammarBuilder a
+  addConstructor' c gs = dedup (dropUnreachable (addConstructor c gs))
 
 -- | Returns all productive nonterminals in the given grammar.
 productive :: Grammar a -> Set Nonterm

@@ -132,18 +132,6 @@ spec = do
     it "should produce the same language when taken over identical grammars (nondet)" $ do
       union nondet nondet `shouldBe` nondet
 
-    it "the list version should work on an empty list" $
-      isEmpty (union' []::GrammarBuilder Text) `shouldBe` True
-
-    it "the list version should work on a singleton list" $
-      union' [nondet] `shouldBeLiteral` nondet
-
-    it "the list version should work on a list with two elements" $
-      union' [nondet, pcf] `shouldBeLiteral` (union nondet pcf)
-
-    it "the list version should work on a list with three elements" $
-      union' [nondet, pcf, infinite] `shouldBeLiteral` (union nondet (union pcf infinite))
-
   describe "Intersection" $ do
     it "of a subset of the PCF grammar should be that subset" $
       intersection pcf pcf_sub `shouldBeLiteral` (grammar "PStart⨯PSStart" $
