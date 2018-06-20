@@ -48,12 +48,9 @@ module TreeAutomata
   ) where
 
 import           Control.DeepSeq
-import           Control.Monad.Except
 import           Control.Monad.State
 
-import           Data.Either
 import           Data.Hashable
-import           Data.IORef
 import           Data.List hiding (union)
 import           Data.Map (Map)
 import qualified Data.Map as Map
@@ -62,10 +59,6 @@ import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.Text (Text)
 import qualified Data.Text as Text
-
-import           Debug.Trace
-
-import           System.IO.Unsafe
 
 type Nonterm = Text
 data Rhs a = Ctor a [Nonterm] | Eps Nonterm deriving (Eq, Ord)

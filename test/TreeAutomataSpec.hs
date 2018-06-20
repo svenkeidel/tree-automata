@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 module TreeAutomataSpec(main, spec) where
 
-import           Control.Monad
 import           Control.Monad.State hiding (sequence)
 
 import qualified Data.Map as M
