@@ -85,7 +85,8 @@ instance Hashable a => Hashable (Rhs a) where
   hashWithSalt s (Eps name) = s `hashWithSalt` (1::Int) `hashWithSalt` name
 
 -- The second field of `Grammar` is strict so whnf is enough to get real benchmark numbers
-data Grammar a = Grammar Nonterm !(Map Nonterm [Rhs a])
+type ProdMap a = Map Nonterm [Rhs a]
+data Grammar a = Grammar Nonterm !(ProdMap a)
 
 instance (Ord a, Show a) => Show (Grammar a) where
   show (Grammar start prods) = "start: " ++ Text.unpack start ++ "\n" ++ concatMap f (Map.toAscList prods)
@@ -131,7 +132,7 @@ singleton c = do
   return (Grammar start (Map.fromList [(start, [ Ctor c [] ])]))
 
 -- | Create a grammar with the given start symbol and production rules
-grammar :: Nonterm -> Map Nonterm [Rhs a] -> GrammarBuilder a
+grammar :: Nonterm -> ProdMap a -> GrammarBuilder a
 grammar s ps = return (Grammar s ps)
 
 -- | Given a non-terminal symbol with n arguments, combines n grammars
@@ -270,7 +271,6 @@ fromSubterms ((c,gs):xs) = foldr (\(c, gs) g -> union (addConstructor' c gs) g) 
   addConstructor' c gs = dedup (dropUnreachable (addConstructor c gs))
 
 type RenameMap = Map ([Nonterm]) Nonterm
-type ProdMap a = Map Nonterm [Rhs a]
 
 determinize :: Ord a => GrammarBuilder a -> GrammarBuilder a
 determinize g = do
@@ -314,7 +314,7 @@ productive (Grammar _ prods) = execState (go prods) p where
     (Ctor _ args : rhss) -> if and (map (`Set.member` p) args) then True else filter rhss p
     (Eps nonterm : rhss) -> if Set.member nonterm p then True else filter rhss p
     [] -> False
-  go :: Map Nonterm [Rhs a] -> State (Set Nonterm) ()
+  go :: ProdMap a -> State (Set Nonterm) ()
   go prods = do p <- get
                 let p' = Set.union p $ Set.fromList [ n | (n, rhss) <- Map.toList prods, filter rhss p ]
                 put p'
@@ -415,7 +415,7 @@ start :: Grammar a -> Nonterm
 start (Grammar s _) = s
 
 -- | Returns the productions of the given grammar.
-productions :: Grammar a -> Map Nonterm [Rhs a]
+productions :: Grammar a -> ProdMap a
 productions (Grammar _ ps) = ps
 
 -- | List the names that occur in a right hand side.
