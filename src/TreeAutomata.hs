@@ -67,8 +67,6 @@ import           Debug.Trace
 
 import           System.IO.Unsafe
 
-import           Util
-
 type Nonterm = Text
 data Rhs a = Ctor a [Nonterm] | Eps Nonterm deriving (Eq, Ord)
 
