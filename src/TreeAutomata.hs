@@ -110,7 +110,10 @@ instance Show (Grammar a) => Show (GrammarBuilder a) where
   show g = show (evalState g 0)
 
 instance Ord a => Eq (GrammarBuilder a) where
-  g1 == g2 = g1 `subsetOf` g2 && g2 `subsetOf` g1
+  g1 == g2 = d1 `subsetOf` d2 && d2 `subsetOf` d1 where
+    -- TODO: fix this
+    d1 = {-if isDeterministic g1 then g1 else-} determinize g1
+    d2 = {-if isDeterministic g2 then g2 else-} determinize g2
 
 deriving instance NFData a => NFData (GrammarBuilder a)
 
@@ -325,12 +328,13 @@ produces g n = any (elem n) (Set.map (\p -> [ c | Ctor c [] <- prods Map.! p]) (
 data Constraint = Constraint (Nonterm, Nonterm) | Trivial Bool deriving (Show)
 type ConstraintSet = Map (Nonterm,Nonterm) [[Constraint]]
 
--- | Test whether the first grammar is a subset of the second, i.e. whether
--- L(g1) ⊆ L(g2).
+-- | Test whether the first grammar is a subset of the second,
+-- i.e. whether L(g1) ⊆ L(g2). Both grammars need to be deterministic,
+-- or the results might not be reliable.
 subsetOf :: Ord a => GrammarBuilder a -> GrammarBuilder a -> Bool
 g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) where
-  Grammar s1 p1 = evalState (epsilonClosure (determinize g1)) 0
-  Grammar s2 p2 = evalState (epsilonClosure g2) 0
+  Grammar s1 p1 = evalState g1 0
+  Grammar s2 p2 = evalState g2 0
   -- Solves the generated set of constraints.
   solve :: (Nonterm, Nonterm) -> ConstraintSet -> Bool
   solve pair constraints = case Map.lookup pair constraints of

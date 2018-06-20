@@ -186,21 +186,22 @@ spec = do
       pcf `subsetOf` pcf `shouldBe` True
 
     it "reflexivity should hold on the nondeterministic grammar" $
-      nondet `subsetOf` nondet `shouldBe` True
+      (determinize nondet) `subsetOf` (determinize nondet) `shouldBe` True
 
     it "should not hold for languages that do not intersect" $ do
-      nondet `subsetOf` pcf `shouldBe` False
-      pcf `subsetOf` nondet `shouldBe` False
+      (determinize nondet) `subsetOf` pcf `shouldBe` False
+      pcf `subsetOf` (determinize nondet) `shouldBe` False
 
     it "should hold for equal grammars" $ do
       pcf `subsetOf` pcf `shouldBe` True
-      nondet `subsetOf` nondet `shouldBe` True
+      (determinize nondet) `subsetOf` (determinize nondet) `shouldBe` True
 
-    it "should work for a nondeterministic grammar" $
+    it "should work for a nondeterministic grammar" $ do
       let det = grammar "Nt0" $ M.fromList [ ("Nt0", [ Ctor "f" ["Nt1","Nt1"]])
                                            , ("Nt1", [ Ctor "g" ["Nt2"]])
                                            , ("Nt2", [ Ctor "a" [], Ctor "g" ["Nt2"]])]
-      in det `subsetOf` nondet `shouldBe` True
+      (determinize nondet) `subsetOf` det `shouldBe` True
+      det `subsetOf` (determinize nondet) `shouldBe` True
 
   describe "Equality" $ do
     it "should be true when comparing the same grammar" $ do
