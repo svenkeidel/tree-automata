@@ -145,9 +145,6 @@ wildcard ctxt = do
   start <- uniqueStart
   return (Grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, is) <- Map.toList ctxt, i <- is])]))
 
-type RenameMap = Map ([Nonterm],[Nonterm]) Nonterm
-type ProdMap a = Map Nonterm [Rhs a]
-
 -- | Union of two grammars. A new, unique start symbol is automatically created.
 -- If either of the grammars is empty, the other is returned as-is.
 union :: Ord a => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
@@ -155,51 +152,10 @@ union g1 g2
  | isEmpty g1 = g2
  | isEmpty g2 = g1
  | otherwise = do
-     -- This merges equal parts of the grammars, to prevent largely
-     -- duplicated production rules in the resulting union.
-     g1' <- epsilonClosure g1
-     g2' <- epsilonClosure g2
-     (ps,rmap) <- go [start g1'] [start g2'] g1' g2' Map.empty Map.empty
-     return (Grammar (rmap Map.! ([start g1'],[start g2'])) ps)
- where
-   go :: Ord a => [Nonterm] -> [Nonterm] -> Grammar a -> Grammar a -> ProdMap a -> RenameMap -> State Int (ProdMap a, RenameMap)
-   go ns1 ns2 g1@(Grammar _ p1) g2@(Grammar _ p2) res rmap = case Map.lookup (ns1,ns2) rmap of
-     Just n -> return (res,rmap)
-     Nothing -> do
-       n <- uniqueNt
-       let rmap' = Map.insert (ns1,ns2) n rmap
-       -- N1  -> foo(A1 ,B1 ) | bar(B1)                               in G1
-       -- N1' -> foo(A1',B1') | biz(B1')                              in G1
-       -- N2  -> foo(A2, B2) | baz(B2)                                in G2
-       -- N1xN1'xN2 -> foo(A1xA1'xA2, B1xB1'xB2) | bar(B1) | bar(B2)  in G3
-       let prods = Map.fromListWith (\(ns1,ns2) (ns1',ns2') -> (ns1 ++ ns1', ns2 ++ ns2'))
-                   $ map fromCtor
-                   $ concat [ Left <$> p1 Map.! n1 | n1 <- ns1 ] ++ concat [ Right <$> p2 Map.! n2 | n2 <- ns2 ]
-       foldM (\(ps,rmap) (c,(s1,s2)) -> case (transpose s1, transpose s2) of
-                 -- TODO: clean up code duplication
-                 (s1,[]) -> do
-                   (ps',rmap') <- foldM (\(ps,rmap) ns1 -> go ns1 [] g1 g2 ps rmap) (ps,rmap) s1
-                   let subterms = map (\ns -> rmap' Map.! (ns,[])) s1
-                   return (Map.insertWith (++) n [(Ctor c subterms)] ps',rmap')
-                 ([],s2) -> do
-                   (ps',rmap') <- foldM (\(ps,rmap) ns2 -> go [] ns2 g1 g2 ps rmap) (ps,rmap) s2
-                   let subterms = map (\ns -> rmap' Map.! ([],ns)) s2
-                   return (Map.insertWith (++) n [(Ctor c subterms)] ps',rmap')
-                 (s1,s2) -> do
-                   -- Transpose reorders the subterms by columns so they can be
-                   -- merged. Look at the example of `foo`.
-                   -- transpose [ [A1,B1], [A1',B1'] ] == [ [A1,A1'], [B1,B1'] ]
-                   -- transpose [ [A2,B2]            ] == [ [A2]    , [B2]     ]
-                   let ss = zip s1 s2
-                   (ps',rmap') <- foldM (\(ps,rmap) (ns1,ns2) -> go ns1 ns2 g1 g2 ps rmap) (ps,rmap) ss
-                   let subterms = map (rmap' Map.!) ss
-                   return (Map.insertWith (++) n [(Ctor c subterms)] ps',rmap')
-             ) (res,rmap') (Map.toList prods)
-   fromCtor :: Either (Rhs a) (Rhs a) -> (a,([[Nonterm]],[[Nonterm]]))
-   fromCtor (Left (Ctor c ns)) = (c,([ns],[]))
-   fromCtor (Right (Ctor c ns)) = (c,([],[ns]))
-   -- TODO: can we properly treat epsilon rules?
-   fromCtor _ = error "epsilon"
+     Grammar start1 prods1 <- g1
+     Grammar start2 prods2 <- g2
+     start <- uniqueStart
+     grammar start (Map.insert start (nub [Eps start1, Eps start2]) $ Map.unionWith (\r1 r2 -> nub (r1 ++ r2)) prods1 prods2)
 
 -- | Returns the intersection of the two given grammars.
 -- The intersection is taken by taking the cross products of 1)
@@ -309,6 +265,40 @@ fromSubterms [] = empty where
 fromSubterms ((c,gs):xs) = foldr (\(c, gs) g -> union (addConstructor' c gs) g) (addConstructor' c gs) xs where
   addConstructor' :: Ord a => a -> [GrammarBuilder a] -> GrammarBuilder a
   addConstructor' c gs = dedup (dropUnreachable (addConstructor c gs))
+
+type RenameMap = Map ([Nonterm]) Nonterm
+type ProdMap a = Map Nonterm [Rhs a]
+
+determinize :: Ord a => GrammarBuilder a -> GrammarBuilder a
+determinize g = do
+  g' <- epsilonClosure g
+  (ps,rmap) <- go [start g'] g' Map.empty Map.empty
+  return (Grammar (rmap Map.! ([start g'])) ps)
+ where
+   go :: Ord a => [Nonterm] -> Grammar a -> ProdMap a -> RenameMap -> State Int (ProdMap a, RenameMap)
+   go ns g@(Grammar _ p) res rmap = case Map.lookup ns rmap of
+     Just n -> return (res,rmap)
+     Nothing -> do
+       n <- uniqueNt
+       let rmap' = Map.insert ns n rmap
+       -- N1  -> foo(A1 ,B1 ) | bar(B1)                               in G1
+       -- N1' -> foo(A1',B1') | biz(B1')                              in G1
+       -- N2  -> foo(A2, B2) | baz(B2)                                in G2
+       -- N1xN1'xN2 -> foo(A1xA1'xA2, B1xB1'xB2) | bar(B1) | bar(B2)  in G3
+       let prods = Map.fromListWith (\ns1 ns1' -> ns1 ++ ns1') $ map fromCtor $ concat [ p Map.! n | n <- ns ]
+       foldM (\(ps,rmap) (c,s) -> do
+                 -- Transpose reorders the subterms by columns so they can be
+                 -- merged. Look at the example of `foo`.
+                 -- transpose [ [A1,B1], [A1',B1'] ] == [ [A1,A1'], [B1,B1'] ]
+                 -- transpose [ [A2,B2]            ] == [ [A2]    , [B2]     ]
+                 let t = transpose s
+                 (ps',rmap') <- foldM (\(ps,rmap) ns -> go ns g ps rmap) (ps,rmap) t
+                 let subterms = map (rmap' Map.!) t
+                 return (Map.insertWith (\r1 r2 -> if head r1 `elem` r2 then r2 else r1 ++ r2) n [(Ctor c subterms)] ps',rmap')
+             ) (res,rmap') (Map.toList prods)
+   fromCtor :: Rhs a -> (a,[[Nonterm]])
+   fromCtor (Ctor c ns) = (c,[ns])
+   fromCtor _ = error "epsilon"
 
 -- | Returns all productive nonterminals in the given grammar.
 productive :: Grammar a -> Set Nonterm
@@ -674,75 +664,3 @@ elimSingleUse (Grammar s p) = normalize (Grammar s (Map.map replaceSingleUse p))
     | n `elem` rhs = 2 -- Use 2 since it can't be inlined
     | otherwise = 0
 -}
-
--- Prods is a radix tree on the arguments to a constructor
-data Prods a = Prods
-  [(a, Nonterm)] -- Given no more arguments, this is the constructors and the non-terminals to which they belong
-  [(Nonterm, Prods a)] -- Given an additional argument, keep traversing down the tree with each Prods
-  deriving (Ord, Eq, Show)
-
-makeProds :: Ord a => Map Nonterm [Rhs a] -> Prods a
-makeProds m = go prods0 where
-  -- prods0 :: Ord a => [([Nonterm], (a, Nonterm))]
-  prods0 = [ (children, (c, nt)) | (nt, rhss) <- Map.toList m, Ctor c children <- rhss]
-  -- go :: Ord a => [([Nonterm], (a, a))] -> Prods a
-  go prods = Prods (concat [ctorAndName | Left ctorAndName <- fac]) [(head, go rest) | Right (head, rest) <- fac] where
-    fac = factorFstHead (sort prods)
-
-factorFst :: (Ord (a, b), Eq a) => [(a, b)] -> [(a, [b])]
-factorFst xs = map f (groupByFst xs) where
-  f xs@(x : _) = (fst x, map snd xs)
-
-groupByFst :: (Ord (a, b), Eq a) => [(a, b)] -> [[(a, b)]]
-groupByFst = groupBy (\x y -> fst x == fst y) . sort
-
-factorFstHead :: (Ord ([a], b), Eq a) => [([a], b)] -> [Either [b] (a, [([a], b)])]
-factorFstHead xs =
-  map f (groupByFstHead xs) where
-  f xs@(([], _) : _) = Left (map snd xs)
-  f xs@(x : _) = Right (head (fst x), map g xs)
-  g (_ : a, b) = (a, b)
-
-groupByFstHead :: (Ord ([a], b), Eq a) => [([a], b)] -> [[([a], b)]]
-groupByFstHead = groupBy (\x y -> maybeHead (fst x) == maybeHead (fst y)) . sort
-
-mapSnd :: (a -> b) -> [(c, a)] -> [(c, b)]
-mapSnd f = map (\(a, b) -> (a, f b))
-
-maybeHead :: [a] -> Maybe a
-maybeHead [] = Nothing
-maybeHead (x : _) = Just x
-
-determinize :: Ord a => GrammarBuilder a -> GrammarBuilder a
-determinize g | not (isDeterministic g) = g
-              | otherwise = do
-  Grammar s m <- epsilonClosure g
-  s' <- uniqueStart
-  let
-      -- newNt :: Set Nonterm -> Text
-      newNt n = ('{' `Text.cons` Text.intercalate (Text.singleton ',') (sort $ Set.toList n) `Text.snoc` '}')
-
-      -- loop :: Ord a => [Set Nonterm] -> GrammarBuilder a
-      loop ss0 = if length ss0 == length ss1
-        then return (Grammar s' (Map.fromList (startEdges ++ res3)))
-        else loop ss1 where
-          ss1 = nub $ sort [s | (_, cn) <- res2, (_, s) <- cn]
-          startEdges :: [(Nonterm, [Rhs a])]
-          startEdges = [(s', [Eps (newNt n) | n <- ss0, s `elem` n])]
-          chooseS :: Ord a => [Set Nonterm] -> [Prods a] -> [([Set Nonterm], [(a, Nonterm)])]
-          chooseS ss prods =
-            (case self of (_, []) -> []; _ -> [self]) ++
-            (case prods of [] -> []; _ -> r) where
-            -- self :: ([Set Nonterm], [(a, Nonterm)])
-            self = (ss, nub $ sort $ concat [c | Prods c _ <- prods])
-            -- children :: [(Nonterm, Prods a)]
-            children = concat [c | Prods _ c <- prods]
-            -- r :: [([Set Nonterm], [(a, Nonterm)])]
-            r = concat [chooseS (ss ++ [s]) (map snd (filter ((`elem` s) . fst) children)) | s <- ss0]
-          -- res :: Ord a => [([Set.Set Nonterm], [(a, Nonterm)])]
-          -- res = chooseS [] [makeProds m]
-          -- res2 :: Ord a => [([Set Nonterm], [(a, Set Nonterm)])]
-          res2 = mapSnd (mapSnd Set.fromList . factorFst) (chooseS [] [makeProds m])
-          -- res3 :: Ord a => [(Nonterm, [Rhs a])]
-          res3 = factorFst [ (newNt nt, Ctor c (map newNt args)) | (args, cnts) <- res2, (c, nt) <- cnts]
-  loop []

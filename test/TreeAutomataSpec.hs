@@ -12,8 +12,6 @@ import           TreeAutomata
 import           Test.Hspec
 import           Test.HUnit
 
-import Debug.Trace
-
 main :: IO ()
 main = hspec spec
 
@@ -77,7 +75,7 @@ spec = do
 
     it "should give all nonterminals for the union of PCF and a nondeterministic grammar" $ do
       let pcf_nondet' = evalState pcf_nondet 0
-      map (`isProductive` pcf_nondet') ["Nt0", "Nt1", "Nt2", "Nt3", "Nt4", "Nt5"] `shouldBe` [True, True, True, True, True, True]
+      map (`isProductive` pcf_nondet') ["Start0", "PStart", "S", "A", "G", "F", "Exp", "Type", "Type"] `shouldBe` [True, True, True, True, True, True, True, True, True]
 
     it "should correctly compute that PCF produces Zero, Num and String" $
       map (\n -> produces (pcf::GrammarBuilder Text) n) ["Zero", "Num", "String", "Succ", "Pred", "Ifz"] `shouldBe` [True, True, True, False, False, False]
@@ -115,13 +113,19 @@ spec = do
 
   describe "Union" $ do
     it "should work on the union of two small grammars" $
-      let g1 = grammar "Foo" $ M.fromList [ ("Foo", [ Eps "Exp" ])
+      let g1 :: GrammarBuilder Text
+          g1 = grammar "Foo" $ M.fromList [ ("Foo", [ Eps "Exp" ])
                                           , ("Exp", [ Ctor "Zero" [] ])]
+          g2 :: GrammarBuilder Text
           g2 = grammar "Bar" $ M.fromList [ ("Bar", [ Eps "Type" ])
                                           , ("Type", [ Ctor "Num" [] ])]
-          g3 = grammar "Nt0" $ M.fromList [ ("Nt0", [ Ctor "Zero" []
-                                                    , Ctor "Num" [] ])]
-      in union (g1::GrammarBuilder Text) (g2::GrammarBuilder Text) `shouldBeLiteral` (g3::GrammarBuilder Text)
+          g3 :: GrammarBuilder Text
+          g3 = grammar "Start0" $ M.fromList [ ("Start0", [ Eps "Foo", Eps "Bar" ])
+                                             , ("Bar", [ Eps "Type" ])
+                                             , ("Exp", [ Ctor "Zero" [] ])
+                                             , ("Foo", [ Eps "Exp" ])
+                                             , ("Type", [ Ctor "Num" [] ])]
+      in union g1 g2 `shouldBeLiteral` g3
 
     it "should work on the union of the nondeterministic and PCF grammars" $
       union pcf nondet `shouldBeLiteral` pcf_nondet
@@ -154,7 +158,7 @@ spec = do
       intersection infinite nondet `shouldBeLiteral` (grammar "EStart⨯S" M.empty)
 
   describe "Inclusion" $ do
-    it "should work for the worked out example" $
+    it "should work for the worked out (deterministic) example" $
       let g = grammar "S" $ M.fromList [("S", [ Ctor "f" ["A"]
                                               , Ctor "c" []
                                               , Ctor "f" ["B"]])
@@ -244,12 +248,37 @@ spec = do
       let det = determinize pcf
       isDeterministic det `shouldBe` True
       det `shouldBe` pcf
+      determinize det `shouldBe` pcf
 
     it "should correctly determinize the nondeterministic grammar" $ do
       let det = determinize nondet
       isDeterministic nondet `shouldBe` False
       isDeterministic det `shouldBe` True
-      trace ("Det: " ++ show det) (det `shouldBe` nondet)
+      det `shouldBe` nondet
+
+    it "should correctly determinize another nondeterministic grammar" $ do
+      let ng :: GrammarBuilder Text
+          ng = grammar "S" $ M.fromList [ ("S", [ Ctor "foo" [], Ctor "foo" [] ]) ]
+          det = determinize ng
+      isDeterministic ng `shouldBe` False
+      isDeterministic det `shouldBe` True
+      det `shouldBe` ng
+
+    it "should correctly determinize another nondeterministic grammar" $ do
+      let ng :: GrammarBuilder Text
+          ng = grammar "S" $ M.fromList [ ("S", [ Ctor "foo" [ "A", "B" ] ])
+                                        , ("A", [ Ctor "bar" [ "C" ]
+                                                , Ctor "bar" [ "D" ]])
+                                        , ("B", [ Ctor "baz" [ "E" ]
+                                                , Ctor "baz" [ "F" ]])
+                                        , ("C", [ Ctor "c" [] ])
+                                        , ("D", [ Ctor "d" [] ])
+                                        , ("E", [ Ctor "e" [] ])
+                                        , ("F", [ Ctor "f" [] ])]
+          det = determinize ng
+      isDeterministic ng `shouldBe` False
+      isDeterministic det `shouldBe` True
+      det `shouldBe` ng
 
     it "should correctly determinize the infinite grammar" $ do
       let det = determinize infinite
@@ -287,28 +316,24 @@ spec = do
                                                        , Ctor "Zero" []])
                                              , ("Type", [ Ctor "Num" []
                                                         , Ctor "Fun" ["Type", "Type"]])]
-    pcf_nondet = grammar "Nt0" $ M.fromList [ ("Nt5", [ Ctor "g" ["Nt5"]
-                                                      , Ctor "a" []])
-                                            , ("Nt4", [ Ctor "g" ["Nt5"]])
-                                            , ("Nt3", [ Ctor "Zero" []
-                                                      , Ctor "Succ" ["Nt3"]
-                                                      , Ctor "Pred" ["Nt3"]
-                                                      , Ctor "Ifz" ["Nt3", "Nt3", "Nt3"]
-                                                      , Ctor "App" ["Nt3","Nt3"]
-                                                      , Ctor "Abs" ["Nt1", "Nt2", "Nt3"]])
-                                            , ("Nt2", [ Ctor "Num" []
-                                                      , Ctor "Fun" ["Nt2","Nt2"]])
-                                            , ("Nt1", [ Ctor "String" [] ])
-                                            , ("Nt0", [ Ctor "f" ["Nt4", "Nt4"]
-                                                      , Ctor "Zero" []
-                                                      , Ctor "Succ" ["Nt3"]
-                                                      , Ctor "Pred" ["Nt3"]
-                                                      , Ctor "Num" []
-                                                      , Ctor "Ifz" ["Nt3", "Nt3", "Nt3"]
-                                                      , Ctor "Fun" ["Nt2","Nt2"]
-                                                      , Ctor "App" ["Nt3","Nt3"]
-                                                      , Ctor "Abs" ["Nt1", "Nt2", "Nt3"]])
-                                            ]
+    pcf_nondet = grammar "Start0" $ M.fromList [ ("Start0", [ Eps "PStart"
+                                                            , Eps "S" ])
+                                               , ("PStart", [ Eps "Exp"
+                                                            , Eps "Type" ])
+                                               , ("S", [ Eps "F" ])
+                                               , ("A", [ Ctor "a" [] ])
+                                               , ("G", [ Ctor "g" [ "G" ]
+                                                       , Ctor "g" [ "A" ]])
+                                               , ("F", [ Ctor "f" [ "G", "G" ]])
+                                               , ("Exp", [ Ctor "App" ["Exp","Exp"]
+                                                         , Ctor "Abs" ["String", "Type", "Exp"]
+                                                         , Ctor "Zero" []
+                                                         , Ctor "Succ" ["Exp"]
+                                                         , Ctor "Pred" ["Exp"]
+                                                         , Ctor "Ifz" ["Exp", "Exp", "Exp"]])
+                                               , ("Type", [ Ctor "Num" []
+                                                          , Ctor "Fun" ["Type","Type"]])
+                                               , ("String", [ Ctor "String" [] ])]
 
     -- Because equality is implemented using inclusion, we cannot test
     -- these functions by using `shouldBe`, which uses the Eq type
