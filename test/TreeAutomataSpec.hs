@@ -107,8 +107,9 @@ spec = do
       isSingleton pcf `shouldBe` False
 
     it "should be true on a singleton grammar" $
-      let g = grammar "Foo" (M.fromList [ ("Foo", [ Ctor ("Bar"::Text) [ "Baz" ] ])
-                                        , ("Baz", [ Ctor ("Baz"::Text) [] ]) ])
+      let g :: GrammarBuilder Text
+          g = grammar "Foo" (M.fromList [ ("Foo", [ Ctor "Bar" [ "Baz" ] ])
+                                        , ("Baz", [ Ctor "Baz" [] ]) ])
       in isSingleton g `shouldBe` True
 
   describe "Union" $ do
@@ -159,19 +160,21 @@ spec = do
 
   describe "Inclusion" $ do
     it "should work for the worked out (deterministic) example" $
-      let g = grammar "S" $ M.fromList [("S", [ Ctor "f" ["A"]
+      let g :: GrammarBuilder Text
+          g = grammar "S" $ M.fromList [("S", [ Ctor "f" ["A"]
                                               , Ctor "c" []
                                               , Ctor "f" ["B"]])
                                        ,("A", [ Ctor "g" ["S"]
                                               , Ctor "e" []])
                                        ,("B", [ Ctor "b" []])]
+          g' :: GrammarBuilder Text
           g' = grammar "S'" $ M.fromList [("S'", [ Ctor "f" ["A'"]
                                                  , Ctor "c" []
                                                  , Ctor "f" ["B'"]])
                                          ,("A'", [ Ctor "g" ["S'"]
                                                  , Ctor "e" []])
                                          ,("B'", [ Ctor "b" []])]
-      in (g::GrammarBuilder Text) `subsetOf` (g'::GrammarBuilder Text) `shouldBe` True
+      in g `subsetOf` g' `shouldBe` True
 
     it "should be true for the PCF grammar and a subset of the PCF grammar" $
       pcf_sub `subsetOf` pcf `shouldBe` True
