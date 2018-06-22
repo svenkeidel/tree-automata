@@ -23,7 +23,6 @@ module TreeAutomata
   -- Transformations
   , epsilonClosure
   , normalize
-  , dedup
   , removeUnproductive
   , toSubterms
   , fromSubterms
@@ -184,12 +183,6 @@ epsilonClosure g = do
           sequence_ [epsReach k | Eps k <- Map.findWithDefault (error ("Nonterm " ++ show n ++ " not in the grammar")) n p]
   grammar s (Map.mapWithKey (\k _ -> close k) p)
 
--- | Deduplicates a grammar by removing duplicate production rules.
-dedup :: Ord a => GrammarBuilder a -> GrammarBuilder a
-dedup g = do
-  Grammar start prods <- g
-  grammar start (Map.map (nub . sort) prods)
-
 -- | Removes productions for empty non-terminals
 dropEmpty :: GrammarBuilder a -> GrammarBuilder a
 dropEmpty g = do
@@ -259,7 +252,7 @@ fromSubterms [] = empty where
     return $ Grammar start Map.empty
 fromSubterms ((c,gs):xs) = foldr (\(c, gs) g -> union (addConstructor' c gs) g) (addConstructor' c gs) xs where
   addConstructor' :: Ord a => a -> [GrammarBuilder a] -> GrammarBuilder a
-  addConstructor' c gs = dedup (dropUnreachable (addConstructor c gs))
+  addConstructor' c gs = dropUnreachable (addConstructor c gs)
 
 type RenameMap = Map ([Nonterm]) Nonterm
 
