@@ -29,10 +29,8 @@ module TreeAutomata
   , determinize
 
   -- Queries
-  , productive
   , produces
   , subsetOf
-  , nthSubterm
   , size
   , height
   , start
@@ -268,21 +266,6 @@ determinize g = do
    fromCtor (Ctor c ns) = (c,[ns])
    fromCtor _ = error "epsilon"
 
--- | Returns all productive nonterminals in the given grammar.
-productive :: Grammar a -> Set Nonterm
-productive (Grammar _ prods) = execState (go prods) p where
-  p = Set.fromList [ n | (n, rhss) <- Map.toList prods, producesConstant rhss]
-  filter :: [Rhs a] -> Set Nonterm -> Bool
-  filter rhss p = case rhss of
-    (Ctor _ args : rhss) -> if and (map (`Set.member` p) args) then True else filter rhss p
-    (Eps nonterm : rhss) -> if Set.member nonterm p then True else filter rhss p
-    [] -> False
-  go :: ProdMap a -> State (Set Nonterm) ()
-  go prods = do p <- get
-                let p' = Set.union p $ Set.fromList [ n | (n, rhss) <- Map.toList prods, filter rhss p ]
-                put p'
-                if p == p' then return () else go prods
-
 -- | Returns true iff the grammar can construct the given constant.
 produces :: Ord a => GrammarBuilder a -> a -> Bool
 produces g n = any (elem n) (Set.map (\p -> [ c | Ctor c [] <- prods Map.! p]) (productive (Grammar s prods))) where
@@ -343,30 +326,10 @@ g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) wh
     (Eps e      , Eps e'       ) -> [Constraint (e,e')]
     _                            -> [Trivial False]
 
--- | Returns a grammar where the start symbol points to the m-th
--- subterm of the n-th production of the original start symbol.
--- If either index is out of bounds, the original grammar is returned.
-nthSubterm :: Int -> Int -> GrammarBuilder a -> GrammarBuilder a
-nthSubterm n m g = do
-  Grammar s ps <- g
-  let prods = fromMaybe [] (Map.lookup s ps)
-  if n >= length prods
-    then g
-    else
-      let Ctor _ args = prods !! n
-      in if m >= length args
-           then g
-           else grammar (args !! m) ps
-
 -- | The size of a regular tree grammar is defined as SUM_(A∈N)(SUM_(A→α) |Aα|).
 size :: GrammarBuilder a -> Int
 size g = Map.foldr (\rhss acc -> foldr (\rhs acc -> 1 + sizeRhs rhs + acc) acc rhss) 0 ps where
   Grammar _ ps = evalState g 0
-
--- | The size of a right hand side.
-sizeRhs :: Rhs a -> Int
-sizeRhs (Ctor _ args) = length args
-sizeRhs (Eps _) = 1
 
 -- | The height of a regular tree grammar is defined as the number of production rules.
 height :: GrammarBuilder a -> Int
@@ -380,11 +343,6 @@ start (Grammar s _) = s
 -- | Returns the productions of the given grammar.
 productions :: Grammar a -> ProdMap a
 productions (Grammar _ ps) = ps
-
--- | List the names that occur in a right hand side.
-rhsNonterms :: Rhs a -> [Nonterm]
-rhsNonterms (Ctor _ ns) = ns
-rhsNonterms (Eps n) = [n]
 
 -- | Returns the alphabet over which the given grammar operates.
 alphabet :: (Ord a, Show a) => GrammarBuilder a -> Alphabet a
@@ -428,6 +386,46 @@ isDeterministic g = all (\rhss -> eqLength (nubBy determinicity rhss) rhss) (Map
   determinicity :: Eq a => Rhs a -> Rhs a -> Bool
   determinicity (Ctor c args) (Ctor c' args') = c == c' && eqLength args args'
   determinicity _ _ = False
+
+-- | Returns all productive nonterminals in the given grammar.
+productive :: Grammar a -> Set Nonterm
+productive (Grammar _ prods) = execState (go prods) p where
+  p = Set.fromList [ n | (n, rhss) <- Map.toList prods, producesConstant rhss]
+  filter :: [Rhs a] -> Set Nonterm -> Bool
+  filter rhss p = case rhss of
+    (Ctor _ args : rhss) -> if and (map (`Set.member` p) args) then True else filter rhss p
+    (Eps nonterm : rhss) -> if Set.member nonterm p then True else filter rhss p
+    [] -> False
+  go :: ProdMap a -> State (Set Nonterm) ()
+  go prods = do p <- get
+                let p' = Set.union p $ Set.fromList [ n | (n, rhss) <- Map.toList prods, filter rhss p ]
+                put p'
+                if p == p' then return () else go prods
+
+-- | The size of a right hand side.
+sizeRhs :: Rhs a -> Int
+sizeRhs (Ctor _ args) = length args
+sizeRhs (Eps _) = 1
+
+-- | List the names that occur in a right hand side.
+rhsNonterms :: Rhs a -> [Nonterm]
+rhsNonterms (Ctor _ ns) = ns
+rhsNonterms (Eps n) = [n]
+
+-- | Returns a grammar where the start symbol points to the m-th
+-- subterm of the n-th production of the original start symbol.
+-- If either index is out of bounds, the original grammar is returned.
+nthSubterm :: Int -> Int -> GrammarBuilder a -> GrammarBuilder a
+nthSubterm n m g = do
+  Grammar s ps <- g
+  let prods = fromMaybe [] (Map.lookup s ps)
+  if n >= length prods
+    then g
+    else
+      let Ctor _ args = prods !! n
+      in if m >= length args
+           then g
+           else grammar (args !! m) ps
 
 -- | Returns true iff any of the right hand sides in the given list
 -- produces a constant.
