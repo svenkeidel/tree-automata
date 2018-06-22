@@ -114,32 +114,40 @@ type Alphabet a = Map a [Arity]
 type Arity = Int
 
 -- | Creates a grammar with a single production from the start symbol
--- to the given constant.
+-- to the given constant. The resulting grammar is by definition
+-- deterministic.
 singleton :: a -> GrammarBuilder a
 singleton c = do
   start <- uniqueStart
   grammar start (Map.singleton start [ Ctor c [] ])
 
--- | Create a grammar with the given start symbol and production rules
+-- | Create a grammar with the given start symbol and production
+-- rules. Depending on the production map, the resulting grammar is
+-- either deterministic or nondeterministic.
 grammar :: Nonterm -> ProdMap a -> GrammarBuilder a
 grammar s ps = return (Grammar s ps)
 
 -- | Given a non-terminal symbol with n arguments, combines n grammars
--- into a single new grammar containing this constructor.
+-- into a single new grammar containing this constructor. If any of
+-- the given grammars is nondeterministic, the resulting grammar is
+-- also nondeterministic.
 addConstructor :: Eq a => a -> [GrammarBuilder a] -> GrammarBuilder a
 addConstructor n gs = do
   s <- uniqueStart
   gs' <- sequence gs
   grammar s (Map.insertWith (++) s [ Ctor n (map start gs') ] (Map.unionsWith (\r1 r2 -> nub (r1 ++ r2)) (map productions gs')))
 
--- | Creates a grammar with all possible terms over a given signature
+-- | Creates a grammar with all possible terms over a given
+-- signature. This grammar is by definition nondeterministic.
 wildcard :: Alphabet a -> GrammarBuilder a
 wildcard ctxt = do
   start <- uniqueStart
   grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, is) <- Map.toList ctxt, i <- is])])
 
--- | Union of two grammars. A new, unique start symbol is automatically created.
--- If either of the grammars is empty, the other is returned as-is.
+-- | Union of two grammars. A new, unique start symbol is
+-- automatically created.  If either of the grammars is empty, the
+-- other is returned as-is. Deterministic grammars are not closed
+-- under union, hence the resulting grammar may be nondeterministic.
 union :: Ord a => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
 union g1 g2
  | isEmpty g1 = g2
@@ -150,10 +158,12 @@ union g1 g2
      start <- uniqueStart
      grammar start (Map.insert start (nub [Eps start1, Eps start2]) $ Map.unionWith (\r1 r2 -> nub (r1 ++ r2)) prods1 prods2)
 
--- | Returns the intersection of the two given grammars.
--- The intersection is taken by taking the cross products of 1)
--- the non-terminals, 2) the start symbols and 3) the production
--- rules. Intuitively, this runs both grammars in parallel.
+-- | Returns the intersection of the two given grammars.  The
+-- intersection is taken by taking the cross products of 1) the
+-- non-terminals, 2) the start symbols and 3) the production
+-- rules. Intuitively, this runs both grammars in
+-- parallel. Deterministic grammars are not closed under intersection,
+-- hence the resulting grammar may be nondeterministic.
 intersection :: Eq a => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
 intersection g1 g2 = do
   Grammar s1 p1 <- g1
@@ -166,7 +176,8 @@ intersection g1 g2 = do
             | (n1, r1) <- Map.toList p1, (n2, r2) <- Map.toList p2]
   normalize $ epsilonClosure $ return $ Grammar (intersectNonterm s1 s2) (Map.fromList prods)
 
--- | Takes the epsilon closure of a grammar.
+-- | Takes the epsilon closure of a grammar, preserving
+-- determinicity.
 epsilonClosure :: GrammarBuilder a -> GrammarBuilder a
 epsilonClosure g = do
   Grammar s p <- g
@@ -182,7 +193,9 @@ epsilonClosure g = do
           sequence_ [epsReach k | Eps k <- Map.findWithDefault (error ("Nonterm " ++ show n ++ " not in the grammar")) n p]
   grammar s (Map.mapWithKey (\k _ -> close k) p)
 
--- | Removes productions that are not reachable form the start
+-- | Removes productions that are not reachable form the start. This
+-- may make a nondeterministic grammar deterministic, if the removed
+-- productions are the only source of nondeterminism.
 dropUnreachable :: GrammarBuilder a -> GrammarBuilder a
 dropUnreachable g = do
   Grammar s p <- g
@@ -195,7 +208,11 @@ dropUnreachable g = do
                sequence_ [mapM_ f (rhsNonterms x) | x <- fromMaybe (error ("Nonterm " ++ show n ++ " not in the grammar")) (Map.lookup n p)]
   grammar s (Map.filterWithKey (\k _ -> Set.member k reachables) p)
 
--- | Removes all nonproductive non-terminals from the given grammar.
+-- | Removes all nonproductive non-terminals from the given grammar. A
+-- nonproductive non-terminal is a non-terminal that does not actually
+-- produce a tree. This may make a nondeterministic grammar
+-- deterministic, if the removed productions are the only source of
+-- nondeterminism.
 dropUnproductive :: GrammarBuilder a -> GrammarBuilder a
 dropUnproductive g = do
   Grammar start prods <- g
@@ -204,8 +221,10 @@ dropUnproductive g = do
       filterProds = filter (all (`Set.member` prodNs) . rhsNonterms)
   grammar start (Map.map filterProds (Map.filterWithKey (\k _ -> k `Set.member` prodNs) prods))
 
--- | Removes useless productions.
--- We drop unreachable first because that plays better with laziness.
+-- | Removes useless productions. Unreachable productions are dropped
+-- first because that plays better with laziness. This may make a
+-- nondeterministic grammar deterministic, if the removed productions
+-- are the only source of nondeterminism.
 normalize :: GrammarBuilder a -> GrammarBuilder a
 normalize = dropUnproductive . dropUnreachable
 
@@ -235,6 +254,8 @@ fromSubterms ((c,gs):xs) = foldr (\(c, gs) g -> union (addConstructor' c gs) g) 
 
 type RenameMap = Map ([Nonterm]) Nonterm
 
+-- | Determinizes a nondeterministic grammar. If the given grammar is
+-- already deterministic, the result is still deterministic.
 determinize :: Ord a => GrammarBuilder a -> GrammarBuilder a
 determinize g = do
   let g' = evalState (epsilonClosure g) 0
@@ -267,7 +288,7 @@ determinize g = do
    fromCtor (Ctor c ns) = (c,[ns])
    fromCtor _ = error "epsilon"
 
--- | Returns true iff the grammar can construct the given constant.
+-- | Returns true iff the given grammar can construct the given constant.
 produces :: Ord a => GrammarBuilder a -> a -> Bool
 produces g n = any (elem n) (Set.map (\p -> [ c | Ctor c [] <- prods Map.! p]) (productive (Grammar s prods))) where
   Grammar s prods = evalState g 0
@@ -277,7 +298,7 @@ type ConstraintSet = Map (Nonterm,Nonterm) [[Constraint]]
 
 -- | Test whether the first grammar is a subset of the second,
 -- i.e. whether L(g1) ⊆ L(g2). Both grammars need to be deterministic,
--- or the results might not be reliable.
+-- or the results might is not reliable.
 subsetOf :: Ord a => GrammarBuilder a -> GrammarBuilder a -> Bool
 g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) where
   Grammar s1 p1 = evalState g1 0
