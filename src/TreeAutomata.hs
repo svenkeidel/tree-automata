@@ -22,8 +22,8 @@ module TreeAutomata
 
   -- Transformations
   , epsilonClosure
+  , dropUnproductive
   , normalize
-  , removeUnproductive
   , toSubterms
   , fromSubterms
   , determinize
@@ -196,19 +196,19 @@ dropUnreachable g = do
                sequence_ [mapM_ f (rhsNonterms x) | x <- fromMaybe (error ("Nonterm " ++ show n ++ " not in the grammar")) (Map.lookup n p)]
   grammar s (Map.filterWithKey (\k _ -> Set.member k reachables) p)
 
--- | Removes useless productions.
--- We drop unreachable first because that plays better with laziness.
-normalize :: GrammarBuilder a -> GrammarBuilder a
-normalize = removeUnproductive . dropUnreachable
-
 -- | Removes all nonproductive non-terminals from the given grammar.
-removeUnproductive :: GrammarBuilder a -> GrammarBuilder a
-removeUnproductive g = do
+dropUnproductive :: GrammarBuilder a -> GrammarBuilder a
+dropUnproductive g = do
   Grammar start prods <- g
   prodNs <- fmap productive g
   let filterProds :: [Rhs a] -> [Rhs a]
       filterProds = filter (all (`Set.member` prodNs) . rhsNonterms)
   grammar start (Map.map filterProds (Map.filterWithKey (\k _ -> k `Set.member` prodNs) prods))
+
+-- | Removes useless productions.
+-- We drop unreachable first because that plays better with laziness.
+normalize :: GrammarBuilder a -> GrammarBuilder a
+normalize = dropUnproductive . dropUnreachable
 
 -- | Destructs a grammar into a list of (c, [G]) tuples where c is a
 -- constructor and [G] is a list of grammars, with each grammar G in
@@ -424,7 +424,7 @@ isProductive n g = Set.member n (productive g)
 isDeterministic :: Eq a => GrammarBuilder a -> Bool
 isDeterministic g = all (\rhss -> eqLength (nubBy determinicity rhss) rhss) (Map.elems m) where
   -- Nondeterminism may hide in unproductive or unreachable production rules, so we remove those first.
-  Grammar _ m = evalState (removeUnproductive (normalize (epsilonClosure g))) 0
+  Grammar _ m = evalState (dropUnproductive (normalize (epsilonClosure g))) 0
   determinicity :: Eq a => Rhs a -> Rhs a -> Bool
   determinicity (Ctor c args) (Ctor c' args') = c == c' && eqLength args args'
   determinicity _ _ = False
