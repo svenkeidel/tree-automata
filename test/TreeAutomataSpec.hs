@@ -20,16 +20,16 @@ spec = do
   describe "Subterms" $ do
     it "should destruct and rebuild PCF" $ do
       let pcf' = fromSubterms (toSubterms pcf)
-      isDeterministic pcf' `shouldBe` True
+      pcf' `shouldSatisfy` isDeterministic
       pcf' `shouldBe` pcf
 
     it "should destruct and rebuild a nondeterministic grammar" $ do
       let nondet'' = fromSubterms (toSubterms nondet)
-      isDeterministic nondet'' `shouldBe` False
+      nondet'' `shouldNotSatisfy` isDeterministic
       nondet'' `shouldBe` nondet
 
     it "should destruct and rebuild the infinite grammar into the empty grammar" $ do
-      isEmpty (fromSubterms (toSubterms infinite)) `shouldBe` True
+      fromSubterms (toSubterms infinite) `shouldSatisfy` isEmpty
 
   describe "Size" $ do
     it "should be 25 on PCF" $
@@ -84,32 +84,32 @@ spec = do
 
   describe "Emptiness" $ do
     it "should be true on the infinite infinite grammar" $
-      isEmpty infinite `shouldBe` True
+      infinite `shouldSatisfy` isEmpty
 
     it "should be false on the nondeterministic grammar" $
-      isEmpty nondet `shouldBe` False
+      nondet `shouldNotSatisfy` isEmpty
 
     it "should be false on the PCF grammar" $
-      isEmpty pcf `shouldBe` False
+      pcf `shouldNotSatisfy` isEmpty
 
     it "should be false on the subset of PCF" $
-      isEmpty pcf_sub `shouldBe` False
+      pcf_sub `shouldNotSatisfy` isEmpty
 
   describe "Singletoness" $ do
     it "should be false on the infinite infinite grammar" $
-      isSingleton infinite `shouldBe` False
+      infinite `shouldNotSatisfy` isSingleton
 
     it "should be false on the nondeterministic grammar" $
-      isSingleton nondet `shouldBe` False
+      nondet `shouldNotSatisfy` isSingleton
 
     it "should be false on the PCF grammar" $
-      isSingleton pcf `shouldBe` False
+      pcf `shouldNotSatisfy` isSingleton
 
     it "should be true on a singleton grammar" $
       let g :: GrammarBuilder Text
           g = grammar "Foo" (M.fromList [ ("Foo", [ Ctor "Bar" [ "Baz" ] ])
                                         , ("Baz", [ Ctor "Baz" [] ]) ])
-      in isSingleton g `shouldBe` True
+      in g `shouldSatisfy` isSingleton
 
   describe "Union" $ do
     it "should work on the union of two small grammars" $
@@ -173,50 +173,33 @@ spec = do
                                          ,("A'", [ Ctor "g" ["S'"]
                                                  , Ctor "e" []])
                                          ,("B'", [ Ctor "b" []])]
-      in g `subsetOf` g' `shouldBe` True
+      in g `shouldSatisfy` subsetOf g'
 
-    it "should be true for the PCF grammar and a subset of the PCF grammar" $
-      pcf_sub `subsetOf` pcf `shouldBe` True
-
-    it "should not work when the arguments are inverted" $
-      pcf `subsetOf` pcf_sub `shouldBe` False
+    it "should be true for the PCF grammar and a subset of the PCF grammar" $ do
+      pcf_sub `shouldSatisfy` (`subsetOf` pcf)
+      pcf `shouldNotSatisfy` (`subsetOf` pcf_sub)
 
     it "reflexivity should hold on PCF" $
-      pcf `subsetOf` pcf `shouldBe` True
+      pcf `shouldSatisfy` subsetOf pcf
 
     it "reflexivity should hold on the nondeterministic grammar" $
-      (determinize nondet) `subsetOf` (determinize nondet) `shouldBe` True
+      determinize nondet `shouldSatisfy` subsetOf (determinize nondet)
 
     it "should not hold for languages that do not intersect" $ do
-      (determinize nondet) `subsetOf` pcf `shouldBe` False
-      pcf `subsetOf` (determinize nondet) `shouldBe` False
-
-    it "should hold for equal grammars" $ do
-      pcf `subsetOf` pcf `shouldBe` True
-      (determinize nondet) `subsetOf` (determinize nondet) `shouldBe` True
-
-    it "should work for a nondeterministic grammar" $ do
-      let det = grammar "Nt0" $ M.fromList [ ("Nt0", [ Ctor "f" ["Nt1","Nt1"]])
-                                           , ("Nt1", [ Ctor "g" ["Nt2"]])
-                                           , ("Nt2", [ Ctor "a" [], Ctor "g" ["Nt2"]])]
-      (determinize nondet) `subsetOf` det `shouldBe` True
-      det `subsetOf` (determinize nondet) `shouldBe` True
+      determinize nondet `shouldNotSatisfy` subsetOf pcf
+      pcf `shouldNotSatisfy` subsetOf (determinize nondet)
 
   describe "Equality" $ do
     it "should be true when comparing the same grammar" $ do
-      pcf == pcf `shouldBe` True
       pcf `shouldBe` pcf
 
     it "should be true when comparing the same grammar (nondet)" $ do
-      nondet == nondet `shouldBe` True
       nondet `shouldBe` nondet
 
     it "should be false when comparing different grammars" $ do
-      pcf == nondet `shouldBe` False
       pcf `shouldNotBe` nondet
 
     it "should be true when comparing different grammars producing the same language" $ do
-      nondet == nondet' `shouldBe` True
       nondet `shouldBe` nondet'
 
   describe "Integration tests" $ do
@@ -249,22 +232,22 @@ spec = do
   describe "Determinization" $ do
     it "should correctly determinize PCF" $ do
       let det = determinize pcf
-      isDeterministic det `shouldBe` True
+      det `shouldSatisfy` isDeterministic
       det `shouldBe` pcf
       determinize det `shouldBe` pcf
 
     it "should correctly determinize the nondeterministic grammar" $ do
       let det = determinize nondet
-      isDeterministic nondet `shouldBe` False
-      isDeterministic det `shouldBe` True
+      nondet `shouldNotSatisfy` isDeterministic
+      det `shouldSatisfy` isDeterministic
       det `shouldBe` nondet
 
     it "should correctly determinize another nondeterministic grammar" $ do
       let ng :: GrammarBuilder Text
           ng = grammar "S" $ M.fromList [ ("S", [ Ctor "foo" [], Ctor "foo" [] ]) ]
           det = determinize ng
-      isDeterministic ng `shouldBe` False
-      isDeterministic det `shouldBe` True
+      ng `shouldNotSatisfy` isDeterministic
+      det `shouldSatisfy` isDeterministic
       det `shouldBe` ng
 
     it "should correctly determinize another nondeterministic grammar" $ do
@@ -279,13 +262,13 @@ spec = do
                                         , ("E", [ Ctor "e" [] ])
                                         , ("F", [ Ctor "f" [] ])]
           det = determinize ng
-      isDeterministic ng `shouldBe` False
-      isDeterministic det `shouldBe` True
+      ng `shouldNotSatisfy` isDeterministic
+      det `shouldSatisfy` isDeterministic
       det `shouldBe` ng
 
     it "should correctly determinize the infinite grammar" $ do
       let det = determinize infinite
-      isDeterministic det `shouldBe` True
+      det `shouldSatisfy` isDeterministic
       det `shouldBe` infinite
 
   where
