@@ -265,9 +265,10 @@ type RenameMap = Map ([Nonterm]) Nonterm
 
 determinize :: Ord a => GrammarBuilder a -> GrammarBuilder a
 determinize g = do
-  g' <- epsilonClosure g
-  (ps,rmap) <- go [start g'] g' Map.empty Map.empty
-  return (Grammar (rmap Map.! ([start g'])) ps)
+  let g' = evalState (epsilonClosure g) 0
+      s = start g'
+  (ps,rmap) <- go [s] g' Map.empty Map.empty
+  grammar (rmap Map.! [s]) ps
  where
    go :: Ord a => [Nonterm] -> Grammar a -> ProdMap a -> RenameMap -> State Int (ProdMap a, RenameMap)
    go ns g@(Grammar _ p) res rmap = case Map.lookup ns rmap of
