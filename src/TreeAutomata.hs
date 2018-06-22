@@ -78,7 +78,7 @@ type Prod a = (Nonterm, Rhs a)
 data Grammar a = Grammar Nonterm !(Map.Map Nonterm [Rhs a])
 type GrammarBuilder a = State Int (Grammar a)
 
-type Alphabet a = Map.Map a Arity
+type Alphabet a = Map.Map a [Arity]
 type Arity = Int
 
 instance Show (Grammar a) => Show (GrammarBuilder a) where
@@ -146,7 +146,7 @@ addConstructor n gs = do
 wildcard :: Alphabet a -> GrammarBuilder a
 wildcard ctxt = do
   start <- uniqueStart
-  return (Grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, i) <- Map.toList ctxt])]))
+  return (Grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, is) <- Map.toList ctxt, i <- is])]))
 
 -- | Union of two grammars. A new, unique start symbol is automatically created.
 -- If either of the grammars is empty, the other is returned as-is.
@@ -400,15 +400,13 @@ rhsNonterms (Eps n) = [n]
 
 -- | Returns the alphabet over which the given grammar operates.
 alphabet :: (Ord a, Show a) => GrammarBuilder a -> Alphabet a
-alphabet g = Map.fromList ctors where
+alphabet g = Map.foldl go Map.empty p where
   Grammar _ p = evalState g 0
-  -- r = case filter ((>1) . length) $ groupBy g' ctors of
-  --   [] -> Map.fromList ctors
-  --   err -> error ("Inconsistent constructors: " ++ show err)
-  ctors = nub $ sort $ concatMap f $ concat $ Map.elems p
-  f (Ctor c n) = [(c, length n)]
-  f (Eps _) = []
-  g' (c1, _) (c2, _) = c1 == c2
+  go :: (Ord a, Show a) => Alphabet a -> [Rhs a] -> Alphabet a
+  go acc [] = acc
+  go acc (n:ns) = case n of
+    Ctor c n -> go (Map.insert c [length n] acc) ns
+    Eps _ -> go acc ns
 
 fresh :: State Int Int
 fresh = do

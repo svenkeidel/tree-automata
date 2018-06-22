@@ -264,6 +264,11 @@ spec = do
     it "intersection absorption should hold" $
       intersection pcf (union pcf simple) `shouldBe` pcf
 
+  describe "Alphabet" $ do
+    it "should correctly list the alphabet of PCF" $
+      let a = M.fromList [("App", [2]), ("Abs", [3]), ("Zero", [0]), ("Succ", [1]), ("Pred", [1]), ("Ifz", [3]), ("Num", [0]), ("Fun", [2]), ("String", [0])]
+      in alphabet pcf `shouldBe` a
+
   where
     simple = grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
                                       , ("A", [ Ctor "a" [] ])
