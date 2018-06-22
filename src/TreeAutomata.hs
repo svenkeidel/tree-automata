@@ -120,7 +120,7 @@ type Arity = Int
 singleton :: a -> GrammarBuilder a
 singleton c = do
   start <- uniqueStart
-  return (Grammar start (Map.fromList [(start, [ Ctor c [] ])]))
+  grammar start (Map.singleton start [ Ctor c [] ])
 
 -- | Create a grammar with the given start symbol and production rules
 grammar :: Nonterm -> ProdMap a -> GrammarBuilder a
@@ -132,13 +132,13 @@ addConstructor :: Eq a => a -> [GrammarBuilder a] -> GrammarBuilder a
 addConstructor n gs = do
   s <- uniqueStart
   gs' <- sequence gs
-  return (Grammar s $ Map.insertWith (++) s [ Ctor n (map start gs') ] (Map.unionsWith (++) (map productions gs')))
+  grammar s (Map.insertWith (++) s [ Ctor n (map start gs') ] (Map.unionsWith (\r1 r2 -> nub (r1 ++ r2)) (map productions gs')))
 
 -- | Creates a grammar with all possible terms over a given signature
 wildcard :: Alphabet a -> GrammarBuilder a
 wildcard ctxt = do
   start <- uniqueStart
-  return (Grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, is) <- Map.toList ctxt, i <- is])]))
+  grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, is) <- Map.toList ctxt, i <- is])])
 
 -- | Union of two grammars. A new, unique start symbol is automatically created.
 -- If either of the grammars is empty, the other is returned as-is.
@@ -182,13 +182,13 @@ epsilonClosure g = do
         unless (Set.member n r) $ do
           put (Set.insert n r)
           sequence_ [epsReach k | Eps k <- Map.findWithDefault (error ("Nonterm " ++ show n ++ " not in the grammar")) n p]
-  return (Grammar s (Map.mapWithKey (\k _ -> close k) p))
+  grammar s (Map.mapWithKey (\k _ -> close k) p)
 
 -- | Deduplicates a grammar by removing duplicate production rules.
 dedup :: Ord a => GrammarBuilder a -> GrammarBuilder a
 dedup g = do
   Grammar start prods <- g
-  return (Grammar start (Map.map (nub . sort) prods))
+  grammar start (Map.map (nub . sort) prods)
 
 -- | Removes productions for empty non-terminals
 dropEmpty :: GrammarBuilder a -> GrammarBuilder a
@@ -209,7 +209,7 @@ dropEmpty g = do
                when (any (all (`Set.member` r) . rhsNonterms) (case Map.lookup n p of Just x -> x)) $ do
                  put (Set.insert n r)
                  sequence_ [f x | x <- Map.findWithDefault [] n invMap]
-  return (Grammar s (Map.map filterProds (Map.filterWithKey (\k _ -> Set.member k nonEmpty) p)))
+  grammar s (Map.map filterProds (Map.filterWithKey (\k _ -> Set.member k nonEmpty) p))
 
 -- | Removes productions that are not reachable form the start
 dropUnreachable :: GrammarBuilder a -> GrammarBuilder a
@@ -222,7 +222,7 @@ dropUnreachable g = do
              unless (Set.member n r) $ do
                put (Set.insert n r)
                sequence_ [mapM_ f (rhsNonterms x) | x <- fromMaybe (error ("Nonterm " ++ show n ++ " not in the grammar")) (Map.lookup n p)]
-  return $ Grammar s (Map.filterWithKey (\k _ -> Set.member k reachables) p) where
+  grammar s (Map.filterWithKey (\k _ -> Set.member k reachables) p)
 
 -- | Removes useless productions.
 -- We drop unreachable first because that plays better with laziness.
@@ -235,7 +235,7 @@ removeUnproductive :: GrammarBuilder a -> GrammarBuilder a
 removeUnproductive g = do
   Grammar start prods <- g
   prodNs <- fmap productive g
-  return (Grammar start (Map.filterWithKey (\k _ -> k `Set.member` prodNs) prods))
+  grammar start (Map.filterWithKey (\k _ -> k `Set.member` prodNs) prods)
 
 -- | Destructs a grammar into a list of (c, [G]) tuples where c is a
 -- constructor and [G] is a list of grammars, with each grammar G in
@@ -384,7 +384,7 @@ nthSubterm n m g = do
       let Ctor _ args = prods !! n
       in if m >= length args
            then g
-           else return (Grammar (args !! m) ps)
+           else grammar (args !! m) ps
 
 -- | The size of a regular tree grammar is defined as SUM_(A∈N)(SUM_(A→α) |Aα|).
 size :: GrammarBuilder a -> Int
