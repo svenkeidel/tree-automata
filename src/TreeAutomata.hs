@@ -22,6 +22,7 @@ module TreeAutomata
 
   -- Transformations
   , epsilonClosure
+  , dropUnreachable
   , dropUnproductive
   , normalize
   , toSubterms
