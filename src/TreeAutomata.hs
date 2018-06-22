@@ -1,3 +1,5 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -93,6 +95,8 @@ instance (Ord a, Show a) => Show (Grammar a) where
 
 instance Eq a => Eq (GrammarBuilder a) where
   g1 == g2 = g1 `subsetOf` g2 && g2 `subsetOf` g1
+
+deriving instance NFData a => NFData (GrammarBuilder a)
 
 -- TODO: Naming context in grammar
 instance NFData a => NFData (Grammar a) where
