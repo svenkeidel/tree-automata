@@ -183,27 +183,6 @@ epsilonClosure g = do
           sequence_ [epsReach k | Eps k <- Map.findWithDefault (error ("Nonterm " ++ show n ++ " not in the grammar")) n p]
   grammar s (Map.mapWithKey (\k _ -> close k) p)
 
--- | Removes productions for empty non-terminals
-dropEmpty :: GrammarBuilder a -> GrammarBuilder a
-dropEmpty g = do
-  Grammar s p <- g
-  let
-    filterProds = filter (all (`Set.member` nonEmpty) . rhsNonterms)
-    nonEmpty = execState (mapM_ f nulls) Set.empty
-    invMap = Map.fromList $
-             map (\xs -> (snd (head xs), nub $ sort $ map fst xs)) $
-             groupBy (\a b -> snd a == snd b) $
-             sortBy (\a b -> snd a `compare` snd b)
-             [(l, x) | (l, r) <- Map.toList p, x <- concatMap rhsNonterms r]
-    nulls = nub $ sort [l | (l, r) <- Map.toList p, Ctor _ [] <- r]
-    f :: Nonterm -> State (Set Nonterm) ()
-    f n = do r <- get
-             unless (Set.member n r) $
-               when (any (all (`Set.member` r) . rhsNonterms) (case Map.lookup n p of Just x -> x)) $ do
-                 put (Set.insert n r)
-                 sequence_ [f x | x <- Map.findWithDefault [] n invMap]
-  grammar s (Map.map filterProds (Map.filterWithKey (\k _ -> Set.member k nonEmpty) p))
-
 -- | Removes productions that are not reachable form the start
 dropUnreachable :: GrammarBuilder a -> GrammarBuilder a
 dropUnreachable g = do
@@ -219,16 +198,17 @@ dropUnreachable g = do
 
 -- | Removes useless productions.
 -- We drop unreachable first because that plays better with laziness.
--- But we also drop unreachable after droping empty, because the empty may lead to unreachable.
 normalize :: GrammarBuilder a -> GrammarBuilder a
-normalize = dropUnreachable . dropEmpty . dropUnreachable
+normalize = removeUnproductive . dropUnreachable
 
 -- | Removes all nonproductive non-terminals from the given grammar.
 removeUnproductive :: GrammarBuilder a -> GrammarBuilder a
 removeUnproductive g = do
   Grammar start prods <- g
   prodNs <- fmap productive g
-  grammar start (Map.filterWithKey (\k _ -> k `Set.member` prodNs) prods)
+  let filterProds :: [Rhs a] -> [Rhs a]
+      filterProds = filter (all (`Set.member` prodNs) . rhsNonterms)
+  grammar start (Map.map filterProds (Map.filterWithKey (\k _ -> k `Set.member` prodNs) prods))
 
 -- | Destructs a grammar into a list of (c, [G]) tuples where c is a
 -- constructor and [G] is a list of grammars, with each grammar G in
@@ -292,8 +272,6 @@ determinize g = do
 productive :: Grammar a -> Set Nonterm
 productive (Grammar _ prods) = execState (go prods) p where
   p = Set.fromList [ n | (n, rhss) <- Map.toList prods, producesConstant rhss]
-  producesConstant :: [Rhs a] -> Bool
-  producesConstant = isJust . find (\r -> case r of Ctor _ [] -> True; _ -> False)
   filter :: [Rhs a] -> Set Nonterm -> Bool
   filter rhss p = case rhss of
     (Ctor _ args : rhss) -> if and (map (`Set.member` p) args) then True else filter rhss p
@@ -450,6 +428,11 @@ isDeterministic g = all (\rhss -> eqLength (nubBy determinicity rhss) rhss) (Map
   determinicity :: Eq a => Rhs a -> Rhs a -> Bool
   determinicity (Ctor c args) (Ctor c' args') = c == c' && eqLength args args'
   determinicity _ _ = False
+
+-- | Returns true iff any of the right hand sides in the given list
+-- produces a constant.
+producesConstant :: [Rhs a] -> Bool
+producesConstant = isJust . find (\r -> case r of Ctor _ [] -> True; _ -> False)
 
 fresh :: State Int Int
 fresh = do
