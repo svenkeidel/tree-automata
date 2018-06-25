@@ -208,6 +208,27 @@ dropUnreachable g = do
                sequence_ [mapM_ f (rhsNonterms x) | x <- fromMaybe (error ("Nonterm " ++ show n ++ " not in the grammar")) (Map.lookup n p)]
   grammar s (Map.filterWithKey (\k _ -> Set.member k reachables) p)
 
+-- | Removes productions for empty non-terminals
+dropEmpty :: GrammarBuilder a -> GrammarBuilder a
+dropEmpty g = do
+  -- TODO: this should be equivalent to dropUnproductive, but isn't. Why not?
+  Grammar s p <- g
+  let
+    filterProds = filter (all (`Set.member` nonEmpty) . rhsNonterms)
+    nonEmpty = execState (mapM_ f nulls) Set.empty
+    invMap = Map.fromList $
+             map (\xs -> (snd (head xs), nub $ map fst xs)) $
+             groupBy (\a b -> snd a == snd b) $
+             [(l, x) | (l, r) <- Map.toList p, x <- concatMap rhsNonterms r]
+    nulls = Set.fromList [l | (l, r) <- Map.toList p, producesConstant r]
+    f :: Nonterm -> State (Set Nonterm) ()
+    f n = do r <- get
+             unless (Set.member n r) $
+               when (any (all (`Set.member` r) . rhsNonterms) (case Map.lookup n p of Just x -> x)) $ do
+                 put (Set.insert n r)
+                 sequence_ [f x | x <- Map.findWithDefault [] n invMap]
+  grammar s (Map.map filterProds (Map.filterWithKey (\k _ -> Set.member k nonEmpty) p))
+
 -- | Removes all nonproductive non-terminals from the given grammar. A
 -- nonproductive non-terminal is a non-terminal that does not actually
 -- produce a tree. This may make a nondeterministic grammar
@@ -222,11 +243,13 @@ dropUnproductive g = do
   grammar start (Map.map filterProds (Map.filterWithKey (\k _ -> k `Set.member` prodNs) prods))
 
 -- | Removes useless productions. Unreachable productions are dropped
--- first because that plays better with laziness. This may make a
--- nondeterministic grammar deterministic, if the removed productions
--- are the only source of nondeterminism.
+-- first because that plays better with laziness. But we also drop
+-- unreachable after droping empty, because the empty may lead to
+-- unreachable. This may make a nondeterministic grammar
+-- deterministic, if the removed productions are the only source of
+-- nondeterminism.
 normalize :: GrammarBuilder a -> GrammarBuilder a
-normalize = dropUnproductive . dropUnreachable
+normalize = dropUnreachable .  dropEmpty . dropUnreachable
 
 -- | Destructs a grammar into a list of (c, [G]) tuples where c is a
 -- constructor and [G] is a list of grammars, with each grammar G in
@@ -391,6 +414,7 @@ isEmpty g = not (isProductive s g') where
 -- alternative productions, and that the start symbol is productive.
 isSingleton :: GrammarBuilder a -> Bool
 isSingleton g = isProductive s (Grammar s ps) && noAlts where
+  -- Non-singletonness may hide in unproductive or unreachable production rules, so we remove those first.
   Grammar s ps = evalState (normalize (epsilonClosure g)) 0
   noAlts = all (\rhss -> length rhss <= 1) (Map.elems ps)
 
@@ -404,7 +428,7 @@ isProductive n g = Set.member n (productive g)
 isDeterministic :: Eq a => GrammarBuilder a -> Bool
 isDeterministic g = all (\rhss -> eqLength (nubBy determinicity rhss) rhss) (Map.elems m) where
   -- Nondeterminism may hide in unproductive or unreachable production rules, so we remove those first.
-  Grammar _ m = evalState (dropUnproductive (normalize (epsilonClosure g))) 0
+  Grammar _ m = evalState (normalize (epsilonClosure g)) 0
   determinicity :: Eq a => Rhs a -> Rhs a -> Bool
   determinicity (Ctor c args) (Ctor c' args') = c == c' && eqLength args args'
   determinicity _ _ = False
