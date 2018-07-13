@@ -273,7 +273,7 @@ fromSubterms [] = empty where
     return $ Grammar start Map.empty
 fromSubterms ((c,gs):xs) = foldr (\(c, gs) g -> union (addConstructor' c gs) g) (addConstructor' c gs) xs where
   addConstructor' :: Eq a => a -> [GrammarBuilder a] -> GrammarBuilder a
-  addConstructor' c gs = dropUnreachable (addConstructor c gs)
+  addConstructor' c gs = normalize (addConstructor c gs)
 
 type RenameMap = Map ([Nonterm]) Nonterm
 
