@@ -257,11 +257,11 @@ normalize = dropUnreachable .  dropEmpty . dropUnreachable
 -- For example, for the start production S -> foo(A,B) | bar(C) this returns
 -- [(foo,[grammar with A as start symbol, grammar with B as start symbol])
 -- ,(bar,[grammar with C as start symbol])]
-toSubterms :: GrammarBuilder a -> [(a,[GrammarBuilder a])]
+toSubterms :: Ord a => GrammarBuilder a -> [(a,[GrammarBuilder a])]
 toSubterms g =
   let g' = epsilonClosure g
       Grammar s ps = evalState g' 0
-  in [ (c,[nthSubterm n m g' | (_,m) <- zip ts [0..]]) | (Ctor c ts,n) <- zip (fromMaybe [] (Map.lookup s ps)) [0..] ]
+  in [ (c,[determinize $ nthSubterm n m g' | (_,m) <- zip ts [0..]]) | (Ctor c ts,n) <- zip (fromMaybe [] (Map.lookup s ps)) [0..] ]
 
 -- | The opposite of `toSubterms`, i.e., given such a list of tuples,
 -- rebuilds the original grammar.
@@ -461,7 +461,7 @@ rhsNonterms (Eps n) = [n]
 -- | Returns a grammar where the start symbol points to the m-th
 -- subterm of the n-th production of the original start symbol.
 -- If either index is out of bounds, the original grammar is returned.
-nthSubterm :: Int -> Int -> GrammarBuilder a -> GrammarBuilder a
+nthSubterm :: Ord a => Int -> Int -> GrammarBuilder a -> GrammarBuilder a
 nthSubterm n m g = do
   Grammar s ps <- g
   let prods = fromMaybe [] (Map.lookup s ps)
