@@ -25,7 +25,7 @@ spec = do
 
     it "should destruct and rebuild a nondeterministic grammar" $ do
       let nondet'' = fromSubterms (toSubterms nondet)
-      nondet'' `shouldNotSatisfy` isDeterministic
+      nondet'' `shouldSatisfy` isDeterministic
       nondet'' `shouldBe` nondet
 
     it "should destruct and rebuild the infinite grammar into the empty grammar" $ do

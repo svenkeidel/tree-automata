@@ -148,7 +148,7 @@ wildcard ctxt = do
 -- automatically created.  If either of the grammars is empty, the
 -- other is returned as-is. Deterministic grammars are not closed
 -- under union, hence the resulting grammar may be nondeterministic.
-union :: Ord a => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
+union :: Eq a => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
 union g1 g2
  | isEmpty g1 = g2
  | isEmpty g2 = g1
@@ -257,23 +257,23 @@ normalize = dropUnreachable .  dropEmpty . dropUnreachable
 -- For example, for the start production S -> foo(A,B) | bar(C) this returns
 -- [(foo,[grammar with A as start symbol, grammar with B as start symbol])
 -- ,(bar,[grammar with C as start symbol])]
-toSubterms :: GrammarBuilder a -> [(a,[GrammarBuilder a])]
+toSubterms :: Ord a => GrammarBuilder a -> [(a,[GrammarBuilder a])]
 toSubterms g =
   let g' = epsilonClosure g
       Grammar s ps = evalState g' 0
-  in [ (c,[nthSubterm n m g' | (_,m) <- zip ts [0..]]) | (Ctor c ts,n) <- zip (fromMaybe [] (Map.lookup s ps)) [0..] ]
+  in [ (c,[determinize $ nthSubterm n m g' | (_,m) <- zip ts [0..]]) | (Ctor c ts,n) <- zip (fromMaybe [] (Map.lookup s ps)) [0..] ]
 
 -- | The opposite of `toSubterms`, i.e., given such a list of tuples,
 -- rebuilds the original grammar.
-fromSubterms :: Ord a =>  [(a, [GrammarBuilder a])] -> GrammarBuilder a
+fromSubterms :: Eq a =>  [(a, [GrammarBuilder a])] -> GrammarBuilder a
 fromSubterms [] = empty where
   empty :: GrammarBuilder a
   empty = do
     start <- uniqueStart
     return $ Grammar start Map.empty
 fromSubterms ((c,gs):xs) = foldr (\(c, gs) g -> union (addConstructor' c gs) g) (addConstructor' c gs) xs where
-  addConstructor' :: Ord a => a -> [GrammarBuilder a] -> GrammarBuilder a
-  addConstructor' c gs = dropUnreachable (addConstructor c gs)
+  addConstructor' :: Eq a => a -> [GrammarBuilder a] -> GrammarBuilder a
+  addConstructor' c gs = normalize (addConstructor c gs)
 
 type RenameMap = Map ([Nonterm]) Nonterm
 
@@ -322,7 +322,7 @@ type ConstraintSet = Map (Nonterm,Nonterm) [[Constraint]]
 -- | Test whether the first grammar is a subset of the second,
 -- i.e. whether L(g1) ⊆ L(g2). Both grammars need to be deterministic,
 -- or the results might is not reliable.
-subsetOf :: Ord a => GrammarBuilder a -> GrammarBuilder a -> Bool
+subsetOf :: Eq a => GrammarBuilder a -> GrammarBuilder a -> Bool
 g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) where
   Grammar s1 p1 = evalState g1 0
   Grammar s2 p2 = evalState g2 0
@@ -390,10 +390,10 @@ productions :: Grammar a -> ProdMap a
 productions (Grammar _ ps) = ps
 
 -- | Returns the alphabet over which the given grammar operates.
-alphabet :: (Ord a, Show a) => GrammarBuilder a -> Alphabet a
+alphabet :: Ord a => GrammarBuilder a -> Alphabet a
 alphabet g = Map.foldl go Map.empty p where
   Grammar _ p = evalState g 0
-  go :: (Ord a, Show a) => Alphabet a -> [Rhs a] -> Alphabet a
+  go :: Ord a => Alphabet a -> [Rhs a] -> Alphabet a
   go acc [] = acc
   go acc (n:ns) = case n of
     Ctor c n -> go (Map.insert c [length n] acc) ns
@@ -461,7 +461,7 @@ rhsNonterms (Eps n) = [n]
 -- | Returns a grammar where the start symbol points to the m-th
 -- subterm of the n-th production of the original start symbol.
 -- If either index is out of bounds, the original grammar is returned.
-nthSubterm :: Int -> Int -> GrammarBuilder a -> GrammarBuilder a
+nthSubterm :: Ord a => Int -> Int -> GrammarBuilder a -> GrammarBuilder a
 nthSubterm n m g = do
   Grammar s ps <- g
   let prods = fromMaybe [] (Map.lookup s ps)
