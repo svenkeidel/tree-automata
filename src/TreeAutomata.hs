@@ -269,7 +269,7 @@ fromSubterms [] = empty where
   empty :: GrammarBuilder a
   empty = do
     start <- uniqueStart
-    return $ Grammar start Map.empty
+    grammar start (Map.singleton start [])
 fromSubterms ((c,gs):xs) = foldr (\(c, gs) g -> union (addConstructor' c gs) g) (addConstructor' c gs) xs where
   addConstructor' :: Eq a => a -> [GrammarBuilder a] -> GrammarBuilder a
   addConstructor' c gs = normalize (addConstructor c gs)
@@ -279,14 +279,14 @@ type RenameMap = Map ([Nonterm]) Nonterm
 -- | Determinizes a nondeterministic grammar. If the given grammar is
 -- already deterministic, the result is still deterministic.
 determinize :: Ord a => GrammarBuilder a -> GrammarBuilder a
-determinize g = do
-  let g' = evalState (epsilonClosure g) 0
-      s = start g'
-  (ps,rmap) <- go [s] g' Map.empty Map.empty
+determinize g | isEmpty g = g
+              | otherwise = do
+  let Grammar s p = evalState (epsilonClosure g) 0
+  (ps,rmap) <- go [s] p Map.empty Map.empty
   grammar (rmap Map.! [s]) ps
  where
-   go :: Ord a => [Nonterm] -> Grammar a -> ProdMap a -> RenameMap -> State Int (ProdMap a, RenameMap)
-   go ns g@(Grammar _ p) res rmap = case Map.lookup ns rmap of
+   go :: Ord a => [Nonterm] -> ProdMap a -> ProdMap a -> RenameMap -> State Int (ProdMap a, RenameMap)
+   go ns p res rmap = case Map.lookup ns rmap of
      Just n -> return (res,rmap)
      Nothing -> do
        n <- uniqueNt
@@ -295,14 +295,14 @@ determinize g = do
        -- N1' -> foo(A1',B1') | biz(B1')                              in G1
        -- N2  -> foo(A2, B2) | baz(B2)                                in G2
        -- N1xN1'xN2 -> foo(A1xA1'xA2, B1xB1'xB2) | bar(B1) | bar(B2)  in G3
-       let prods = Map.fromListWith (\ns1 ns1' -> ns1 ++ ns1') $ map fromCtor $ concat [ p Map.! n | n <- ns ]
+       let prods = Map.fromListWith (++) $ map fromCtor $ concat $ map (p Map.!) ns
        foldM (\(ps,rmap) (c,s) -> do
                  -- Transpose reorders the subterms by columns so they can be
                  -- merged. Look at the example of `foo`.
                  -- transpose [ [A1,B1], [A1',B1'] ] == [ [A1,A1'], [B1,B1'] ]
                  -- transpose [ [A2,B2]            ] == [ [A2]    , [B2]     ]
                  let t = transpose s
-                 (ps',rmap') <- foldM (\(ps,rmap) ns -> go ns g ps rmap) (ps,rmap) t
+                 (ps',rmap') <- foldM (\(ps,rmap) ns -> go ns p ps rmap) (ps,rmap) t
                  let subterms = map (rmap' Map.!) t
                  return (Map.insertWith (\r1 r2 -> if head r1 `elem` r2 then r2 else r1 ++ r2) n [(Ctor c subterms)] ps',rmap')
              ) (res,rmap') (Map.toList prods)

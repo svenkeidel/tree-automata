@@ -231,6 +231,12 @@ spec = do
       in alphabet pcf `shouldBe` a
 
   describe "Determinization" $ do
+    it "should work on an empty grammar" $ do
+      let empty :: GrammarBuilder Text
+          empty = grammar "S" $ M.fromList [ ("S", []) ]
+      empty `shouldSatisfy` isDeterministic
+      determinize empty `shouldBe` empty
+
     it "should correctly determinize PCF" $ do
       let det = determinize pcf
       det `shouldSatisfy` isDeterministic
