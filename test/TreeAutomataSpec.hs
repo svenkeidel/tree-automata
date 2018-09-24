@@ -3,6 +3,7 @@ module TreeAutomataSpec(main, spec) where
 
 import           Control.Monad.State hiding (sequence)
 
+import           Data.List hiding (union)
 import qualified Data.Map as M
 import           Data.Text (Text)
 
@@ -332,10 +333,9 @@ spec = do
     -- detect spurious non-terminal symbols and production rules.
     shouldBeLiteral :: (Ord a, Show a) => GrammarBuilder a -> GrammarBuilder a -> Expectation
     actual `shouldBeLiteral` expected =
-      -- TODO: apparently the order of the right hand sides in the maps matters. For now, just make the right order in the test cases,
-      -- but eventually we should implement a custom equality check that does not depend on order.
-        unless (start actual' == start expected' && productions actual' == productions expected')
-          (assertFailure $ "Grammars are not literally equal.\nExpected:\n\n" ++ show expected ++ "\nbut got:\n\n" ++ show actual)
-        where
-          expected' = evalState expected 0
-          actual' = evalState actual 0
+      unless (start actual' == start expected' && productions' actual' == productions' expected')
+        (assertFailure $ "Grammars are not literally equal.\nExpected:\n\n" ++ show expected ++ "\nbut got:\n\n" ++ show actual)
+      where
+        expected' = evalState expected 0
+        actual' = evalState actual 0
+        productions' g = M.map sort (productions g)
