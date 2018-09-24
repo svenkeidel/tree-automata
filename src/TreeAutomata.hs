@@ -23,6 +23,7 @@ module TreeAutomata
   -- Transformations
   , epsilonClosure
   , dropUnreachable
+  , dropEmpty
   , dropUnproductive
   , normalize
   , toSubterms
@@ -101,9 +102,10 @@ instance Show (Grammar a) => Show (GrammarBuilder a) where
 
 instance Ord a => Eq (GrammarBuilder a) where
   g1 == g2 = d1 `subsetOf` d2 && d2 `subsetOf` d1 where
-    -- TODO: fix this
-    d1 = {-if isDeterministic g1 then g1 else-} determinize g1
-    d2 = {-if isDeterministic g2 then g2 else-} determinize g2
+    g1' = normalize (epsilonClosure g1)
+    g2' = normalize (epsilonClosure g2)
+    d1 = if isDeterministic g1' then g1' else determinize g1'
+    d2 = if isDeterministic g2' then g2' else determinize g2'
 
 deriving instance NFData a => NFData (GrammarBuilder a)
 
@@ -201,10 +203,11 @@ dropUnreachable g = do
   let
     reachables = execState (f s) Set.empty
     f :: Nonterm -> State (Set Nonterm) ()
-    f n = do r <- get
-             unless (Set.member n r) $ do
-               put (Set.insert n r)
-               sequence_ [mapM_ f (rhsNonterms x) | x <- fromMaybe (error ("Nonterm " ++ show n ++ " not in the grammar")) (Map.lookup n p)]
+    f n = do
+      r <- get
+      unless (Set.member n r) $ do
+        put (Set.insert n r)
+        sequence_ [mapM_ f (rhsNonterms x) | x <- fromMaybe [] (Map.lookup n p)]
   grammar s (Map.filterWithKey (\k _ -> Set.member k reachables) p)
 
 -- | Removes productions for empty non-terminals
@@ -215,10 +218,7 @@ dropEmpty g = do
   let
     filterProds = filter (all (`Set.member` nonEmpty) . rhsNonterms)
     nonEmpty = execState (mapM_ f nulls) Set.empty
-    invMap = Map.fromList $
-             map (\xs -> (snd (head xs), nub $ map fst xs)) $
-             groupBy (\a b -> snd a == snd b) $
-             [(l, x) | (l, r) <- Map.toList p, x <- concatMap rhsNonterms r]
+    invMap = invert (Map.map (concatMap rhsNonterms) p)
     nulls = Set.fromList [l | (l, r) <- Map.toList p, producesConstant r]
     f :: Nonterm -> State (Set Nonterm) ()
     f n = do r <- get
@@ -248,7 +248,7 @@ dropUnproductive g = do
 -- deterministic, if the removed productions are the only source of
 -- nondeterminism.
 normalize :: GrammarBuilder a -> GrammarBuilder a
-normalize = dropUnreachable .  dropEmpty . dropUnreachable
+normalize = dropUnreachable . dropEmpty . dropUnreachable
 
 -- | Destructs a grammar into a list of (c, [G]) tuples where c is a
 -- constructor and [G] is a list of grammars, with each grammar G in
@@ -272,7 +272,7 @@ fromSubterms [] = empty where
     grammar start (Map.singleton start [])
 fromSubterms ((c,gs):xs) = foldr (\(c, gs) g -> union (addConstructor' c gs) g) (addConstructor' c gs) xs where
   addConstructor' :: Eq a => a -> [GrammarBuilder a] -> GrammarBuilder a
-  addConstructor' c gs = normalize (addConstructor c gs)
+  addConstructor' c gs = addConstructor c gs
 
 type RenameMap = Map ([Nonterm]) Nonterm
 
@@ -357,7 +357,7 @@ g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) wh
   -- all constructors creating constraints of the form [[A⊆A' ∨ A⊆B' ∨ False],[B⊆A' ∨ B⊆B' ∨ False],[False ∨ False ∨ True].
   -- As an optimization, False results are skipped entirely, creating instead [[A⊆A' ∨ A⊆B'],[B⊆A' ∨ B⊆B'],[True]
   shareCtor :: Nonterm -> Nonterm -> [[Constraint]]
-  shareCtor a1 a2 = [ [ r | r2 <- p2 Map.! a2, r <- match r1 r2 ] | r1 <- p1 Map.! a1 ]
+  shareCtor a1 a2 = [ [ r | r2 <- Map.findWithDefault [] a2 p2, r <- match r1 r2 ] | r1 <- Map.findWithDefault [] a1 p1 ]
   -- Given two constructors, this function creates the actual constraints:
   -- 1. If two constants are identical, i.e. c and c from the example above, this is trivially true.
   -- 2. If two constructors `foo` are found of equal arity, the constraint is formed pair-wise of their subterms.
@@ -411,10 +411,11 @@ isEmpty g = not (isProductive s g') where
 -- | Tests whether the given grammar produces a single term. This can
 -- be tested by checking that every non-terminal symbol has no
 -- alternative productions, and that the start symbol is productive.
+-- Non-singletonness may hide in unproductive or unreachable production rules,
+-- so make sure those are removed first.
 isSingleton :: GrammarBuilder a -> Bool
 isSingleton g = isProductive s (Grammar s ps) && noAlts where
-  -- Non-singletonness may hide in unproductive or unreachable production rules, so we remove those first.
-  Grammar s ps = evalState (normalize (epsilonClosure g)) 0
+  Grammar s ps = evalState g 0
   noAlts = all (\rhss -> length rhss <= 1) (Map.elems ps)
 
 -- | Tests whether the given nonterminal is productive in the given
@@ -424,10 +425,12 @@ isProductive n g = Set.member n (productive g)
 
 -- | Checks if the given grammar is deterministic. A deterministic
 -- grammar has no production rules of the form X -> foo(A) | foo(A').
+-- Since nondeterminism may hide in unproductive or unreachable
+-- production rules, make sure those are removed before calling this
+-- function.
 isDeterministic :: Eq a => GrammarBuilder a -> Bool
 isDeterministic g = all (\rhss -> eqLength (nubBy determinicity rhss) rhss) (Map.elems m) where
-  -- Nondeterminism may hide in unproductive or unreachable production rules, so we remove those first.
-  Grammar _ m = evalState (normalize (epsilonClosure g)) 0
+  Grammar _ m = evalState g 0
   determinicity :: Eq a => Rhs a -> Rhs a -> Bool
   determinicity (Ctor c args) (Ctor c' args') = c == c' && eqLength args args'
   determinicity _ _ = False
@@ -497,6 +500,11 @@ eqLength :: [a] -> [b] -> Bool
 eqLength [] [] = True
 eqLength (_:as) (_:bs) = eqLength as bs
 eqLength _ _ = False
+
+-- | Inverts a map.
+invert :: (Ord k, Ord v) => Map k [v] -> Map v [k]
+invert m = Map.fromListWith (++) pairs
+    where pairs = [(v, [k]) | (k, vs) <- Map.toList m, v <- vs]
 
 {-
 introduceEpsilons :: Grammar -> Grammar

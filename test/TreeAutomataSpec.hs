@@ -115,17 +115,13 @@ spec = do
   describe "Union" $ do
     it "should work on the union of two small grammars" $
       let g1 :: GrammarBuilder Text
-          g1 = grammar "Foo" $ M.fromList [ ("Foo", [ Eps "Exp" ])
-                                          , ("Exp", [ Ctor "Zero" [] ])]
+          g1 = grammar "Foo" $ M.fromList [ ("Foo", [ Ctor "Zero" [] ])]
           g2 :: GrammarBuilder Text
-          g2 = grammar "Bar" $ M.fromList [ ("Bar", [ Eps "Type" ])
-                                          , ("Type", [ Ctor "Num" [] ])]
+          g2 = grammar "Bar" $ M.fromList [ ("Bar", [ Ctor "Num" [] ])]
           g3 :: GrammarBuilder Text
           g3 = grammar "Start0" $ M.fromList [ ("Start0", [ Eps "Foo", Eps "Bar" ])
-                                             , ("Bar", [ Eps "Type" ])
-                                             , ("Exp", [ Ctor "Zero" [] ])
-                                             , ("Foo", [ Eps "Exp" ])
-                                             , ("Type", [ Ctor "Num" [] ])]
+                                             , ("Foo", [ Ctor "Zero" [] ])
+                                             , ("Bar", [ Ctor "Num" [] ])]
       in union g1 g2 `shouldBeLiteral` g3
 
     it "should work on the union of the nondeterministic and PCF grammars" $
@@ -230,6 +226,14 @@ spec = do
       let a = M.fromList [("App", [2]), ("Abs", [3]), ("Zero", [0]), ("Succ", [1]), ("Pred", [1]), ("Ifz", [3]), ("Num", [0]), ("Fun", [2]), ("String", [0])]
       in alphabet pcf `shouldBe` a
 
+  describe "Normalization" $ do
+    it "should work on an empty grammar" $ do
+      let empty :: GrammarBuilder Text
+          empty = grammar "S" $ M.fromList [ ("S", []) ]
+      dropUnreachable empty `shouldBeLiteral` empty
+      dropEmpty empty `shouldBeLiteral` grammar "S" M.empty
+      normalize empty `shouldBeLiteral` grammar "S" M.empty
+
   describe "Determinization" $ do
     it "should work on an empty grammar" $ do
       let empty :: GrammarBuilder Text
@@ -246,6 +250,7 @@ spec = do
     it "should correctly determinize the nondeterministic grammar" $ do
       let det = determinize nondet
       nondet `shouldNotSatisfy` isDeterministic
+      nondet' `shouldNotSatisfy` isDeterministic
       det `shouldSatisfy` isDeterministic
       det `shouldBe` nondet
 
