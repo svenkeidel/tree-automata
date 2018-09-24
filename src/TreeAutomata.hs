@@ -162,8 +162,7 @@ union g1 g2
 -- intersection is taken by taking the cross products of 1) the
 -- non-terminals, 2) the start symbols and 3) the production
 -- rules. Intuitively, this runs both grammars in
--- parallel. Deterministic grammars are not closed under intersection,
--- hence the resulting grammar may be nondeterministic.
+-- parallel. Deterministic grammars are closed under intersection.
 intersection :: Eq a => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
 intersection g1 g2 = do
   Grammar s1 p1 <- g1
