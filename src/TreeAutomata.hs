@@ -258,7 +258,7 @@ dropUnproductive g = do
 -- deterministic, if the removed productions are the only source of
 -- nondeterminism.
 normalize :: GrammarBuilder a -> GrammarBuilder a
-normalize = dropUnreachable . dropEmpty . dropUnreachable
+normalize = dropUnreachable . dropEmpty
 
 -- | Destructs a grammar into a list of (c, [G]) tuples where c is a
 -- constructor and [G] is a list of grammars, with each grammar G in
