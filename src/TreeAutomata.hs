@@ -29,6 +29,16 @@ module TreeAutomata
   , toSubterms
   , fromSubterms
   , determinize
+  , widen
+  , widen'
+  , replaceNonterm
+  , replaceEdge
+  , wideningClashes
+  , correspondenceSet
+  , arcReplacements
+  , arcAncestor
+  , findAncestors
+  , wideMap
 
   -- Queries
   , produces
@@ -248,7 +258,7 @@ dropUnproductive g = do
 -- deterministic, if the removed productions are the only source of
 -- nondeterminism.
 normalize :: GrammarBuilder a -> GrammarBuilder a
-normalize = dropUnreachable . dropEmpty . dropUnreachable
+normalize = dropUnreachable . dropEmpty
 
 -- | Destructs a grammar into a list of (c, [G]) tuples where c is a
 -- constructor and [G] is a list of grammars, with each grammar G in
@@ -309,6 +319,164 @@ determinize g | isEmpty g = g
    fromCtor :: Rhs a -> (a,[[Nonterm]])
    fromCtor (Ctor c ns) = (c,[ns])
    fromCtor _ = error "epsilon"
+
+widen :: (Show a, Ord a) => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
+widen g1 g2 = widen' g1 (union g1 g2)
+
+type WideMap a = Map Nonterm (Int,Set a,[Rhs a])
+
+widen' :: (Show a, Ord a) => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
+widen' g1 g2 = do
+  let g1'@(Grammar s1 _) = evalState g1 0
+      g2'@(Grammar s2 _) = evalState g2 0
+      w1 = wideMap g1'
+      w2 = wideMap g2'
+      correspondence = correspondenceSet s1 w1 s2 w2
+      wideClashes = wideningClashes correspondence w1 w2
+      nodes = nodeReplacements g2' wideClashes w1 w2
+      arcs = arcReplacements g2' wideClashes w1 w2
+  if Map.null arcs
+    then if Map.null nodes
+      then g2
+      else
+        let ((n',a),_) = minimumBy (closestAncestor w2) (Map.toList nodes)
+        in normalize $ return $ replaceNonterm n' a g2'
+    else
+      let ((n',a),edges) = minimumBy (closestAncestor w2) (Map.toList arcs)
+          (ctor,lhs,i) = Set.elemAt 0 edges
+      in normalize $ return $ replaceEdge ctor lhs i a g2'
+
+-- | Heuristic: best node replacement is the one that has the closest ancestor.
+closestAncestor :: WideMap a -> ((Nonterm,Nonterm),Set (a,Nonterm,Int)) -> ((Nonterm,Nonterm),Set (a,Nonterm,Int)) -> Ordering
+closestAncestor w ((n,a),_) ((m,a'),_) = toEnum (d1 - d2) where
+  d1 = depth a w - depth n w
+  d2 = depth a' w - depth m w
+
+-- | Replaces the given nonterminal throughout the entire grammar.
+replaceNonterm :: Nonterm -> Nonterm -> Grammar a -> Grammar a
+replaceNonterm n a (Grammar s ps) = if s == n then Grammar a ps' else Grammar s ps' where
+  ps' = Map.map (map (replace n a)) (Map.delete n ps)
+  replace n a rhs = case rhs of
+    Ctor c ts -> Ctor c (map (\m -> if m == n then a else m) ts)
+    Eps e     -> if e == n then Eps a else Eps e
+
+-- | Replaces the ith nonterminal in constructor ctor in the right
+-- hand side of the given lhs.  For example, A -> foo(B,C) | bar(B,C)
+-- should become A -> foo(B',C) | bar(B,C) and A -> foo(B,B) should
+-- become A -> foo(B',B).
+replaceEdge :: (Show a, Eq a) => a -> Nonterm -> Int -> Nonterm -> Grammar a -> Grammar a
+replaceEdge ctor lhs i ancestor (Grammar s ps) = Grammar s ps' where
+  ps' = Map.adjust (foldr (\rhs rhss -> case rhs of
+                              Ctor c' args | ctor == c' -> Ctor ctor (replace args i ancestor):rhss
+                              _ -> rhs:rhss) []) lhs ps
+
+-- | Replaces the ith element in the given list with the given element.
+-- TODO: make safe, or use Data.Seq.
+replace :: [a] -> Int -> a -> [a]
+replace xs i x = case splitAt i xs of
+  (front, element:back) -> front ++ x : back
+  _ -> xs
+
+nodeReplacements :: Ord a => Grammar a -> Map (Nonterm,Nonterm) (Set (a,Nonterm,Int)) -> WideMap a -> WideMap a -> Map (Nonterm,Nonterm) (Set (a,Nonterm,Int))
+nodeReplacements = findRule nodeAncestor
+
+nodeAncestor :: Ord a => Nonterm -> Nonterm -> [Nonterm] -> WideMap a -> WideMap a -> Grammar a -> Maybe Nonterm
+nodeAncestor _ _ [] _ _ _ = Nothing
+nodeAncestor n n' ancs w1 w2 g = let
+  d2 = depth n' w2
+  -- Heuristic: the best ancestor is the one "closest" (depth-wise) to the current nonterminal n.
+  -- Based on nothing but gut feeling.
+  (_,a) = minimum $ map (\a -> (d2 - depth a w2,a)) ancs
+  -- Now test whether the found ancestor is a valid ancestor.
+  in if depth n w1 >= depth a w2 && not (overapproximates n' a (productions g)) && ((prlb' n' w2) `Set.isSubsetOf` (prlb' a w2)) || depth n w1 < depth n' w2
+     then Just a
+     else nodeAncestor n n' (delete a ancs) w1 w2 g
+
+arcReplacements :: Ord a => Grammar a -> Map (Nonterm,Nonterm) (Set (a,Nonterm,Int)) -> WideMap a -> WideMap a -> Map (Nonterm,Nonterm) (Set (a,Nonterm,Int))
+arcReplacements = findRule arcAncestor
+
+arcAncestor :: Ord a => Nonterm -> Nonterm -> [Nonterm] -> WideMap a -> WideMap a -> Grammar a -> Maybe Nonterm
+arcAncestor _ _ [] _ _ _ = Nothing
+arcAncestor n n' ancs w1 w2 g = let
+  d2 = depth n' w2
+  -- Heuristic: the best ancestor is the one "closest" (depth-wise) to the current nonterminal n.
+  -- Based on nothing but gut feeling.
+  (_,a) = minimum $ map (\a -> (d2 - depth a w2,a)) ancs
+    -- Now test whether the found ancestor is a valid ancestor.
+    in if depth n w1 >= depth a w2 && overapproximates n' a (productions g)
+     then Just a
+     else arcAncestor n n' (delete a ancs) w1 w2 g
+
+overapproximates :: Ord a => Nonterm -> Nonterm -> ProdMap a -> Bool
+overapproximates n a ps = nontermGrammar `subsetOf` ancestorGrammar where
+  ancestorGrammar = grammar a ps
+  nontermGrammar = grammar n ps
+
+wideningClash :: Ord a => Nonterm -> WideMap a -> Nonterm -> WideMap a -> Bool
+wideningClash n w1 n' w2 = (depth n w1 == depth n' w2 && prlb' n w1 /= prlb' n' w2) || depth n w1 < depth n' w2
+
+wideningClashes :: Ord a => Map (Nonterm,Nonterm) (Set (a,Nonterm,Int)) -> WideMap a -> WideMap a -> Map (Nonterm,Nonterm) (Set (a,Nonterm,Int))
+wideningClashes correspondence w1 w2 = Map.filterWithKey (\(n,n') _ -> wideningClash n w1 n' w2) correspondence
+
+-- | Given a set of widening topological clashes and a selection
+-- function, findRule makes a selection from the clashes. See
+-- arcReplacements and nodeReplacements.
+findRule :: Ord a => (Nonterm -> Nonterm -> [Nonterm] -> WideMap a -> WideMap a -> Grammar a -> Maybe Nonterm)
+  -> Grammar a -> Map (Nonterm,Nonterm) (Set (a,Nonterm,Int)) -> WideMap a -> WideMap a -> Map (Nonterm,Nonterm) (Set (a,Nonterm,Int))
+findRule selection g2 wideClashes w1 w2 = Map.foldrWithKey (\(n,n') edges ancestors -> case selection n n' (findAncestors n' w2 g2) w1 w2 g2 of
+    Nothing -> ancestors
+    Just a  -> Map.insert (n',a) edges ancestors) Map.empty wideClashes where
+
+-- | Requires an epsilon closured grammar.
+correspondenceSet :: Ord a => Nonterm -> WideMap a -> Nonterm -> WideMap a -> Map (Nonterm,Nonterm) (Set (a,Nonterm,Int))
+correspondenceSet s1 w1 s2 w2 = go (Map.singleton (s1,s2) Set.empty) s1 s2 where
+  go correspondence n n' = if depth s1 w1 /= depth s2 w2 || prlb' s1 w1 /= prlb' s2 w2
+    then correspondence
+    else
+      -- TODO: this assumes the same order of right hand sides when zipping.
+      let toAdd = Map.fromListWith Set.union [ ((a,a'),Set.singleton (c,n',i)) | Ctor c args <- prods n w1, Ctor c' args' <- prods n' w2, c == c', (a,a',i) <- zip3 args args' [0..] ]
+      in Map.foldrWithKey (\(a,a') edges correspondence -> case Map.lookup (a,a') correspondence of
+           Nothing -> go (Map.insert (a,a') edges correspondence) a a'
+           Just edges' -> if edges `Set.isSubsetOf` edges'
+             then correspondence
+             else go (Map.insertWith Set.union (a,a') edges correspondence) a a') correspondence toAdd
+
+-- | Finds all proper ancestors of a nonterminal, i.e., all
+-- nonterminals that can (in)directly produce the given nonterminal not including
+-- that nonterminal itself.
+findAncestors :: Nonterm -> WideMap a -> Grammar a -> [Nonterm]
+findAncestors n w g = Set.toList ancestors where
+  ancestors = go n w g $ Set.filter (\p -> p /= n && n `elem` children (prods p w)) (productive g)
+  go :: Nonterm -> WideMap a -> Grammar a -> Set Nonterm -> Set Nonterm
+  go n w g ancs = if ancs == ancs'' then ancs else go n w g ancs'' where
+    ancs' = Set.filter (\p -> not (Set.null (ancs `Set.intersection` Set.fromList (children (prods p w))))) (productive g)
+    ancs'' = Set.union ancs' ancs
+
+depth :: Nonterm -> WideMap a -> Int
+depth n w = let (d,_,_) = w Map.! n in d
+
+prlb' :: Nonterm -> WideMap a -> Set a
+prlb' n w = let (_,p,_) = w Map.! n in p
+
+prods :: Nonterm -> WideMap a -> [Rhs a]
+prods n w = let (_,_,p) = w Map.! n in p
+
+-- | The principal label set of a given nonterminal symbol is the set
+-- of constructor names that it can generate.
+prlb :: Ord a => Nonterm -> ProdMap a -> Set a
+prlb n prods = Set.fromList [ c | Ctor c _ <- prods Map.! n ]
+
+-- | This function computes the information required to perform the
+-- widening.  This information is, for each nonterminal symbol in the
+-- grammar, its depth and its principal label set.  The depth of a
+-- nonterminal is defined as the smallest number of steps that it
+-- takes to reach this nonterminal, from the start symbol. Per
+-- definition, the depth of the start symbol is 0.
+wideMap :: Ord a => Grammar a -> WideMap a
+wideMap (Grammar s ps) = go s (Map.singleton s (0, prlb s ps, ps Map.! s)) where
+  go n w = foldr (\c w -> let (d',_,_) = w Map.! n in case Map.lookup c w of
+    Just (d'',prlbs,rhs) -> if (d'+1) < d'' then go c (Map.insert c (d'+1,prlbs,rhs) w) else w
+    Nothing -> go c (Map.insert c (d'+1,prlb c ps, ps Map.! c) w)) w (children $ ps Map.! n)
 
 -- | Returns true iff the given grammar can construct the given constant.
 produces :: Ord a => GrammarBuilder a -> a -> Bool
@@ -459,6 +627,10 @@ sizeRhs (Eps _) = 1
 rhsNonterms :: Rhs a -> [Nonterm]
 rhsNonterms (Ctor _ ns) = ns
 rhsNonterms (Eps n) = [n]
+
+-- | List the names that occur in all right hand sides.
+children :: [Rhs a] -> [Nonterm]
+children = nub . concat . map rhsNonterms
 
 -- | Returns a grammar where the start symbol points to the m-th
 -- subterm of the n-th production of the original start symbol.

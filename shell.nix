@@ -1,19 +1,20 @@
-{ nixpkgs ? import <nixpkgs> {}, compiler ? "default" }:
+{ nixpkgs ? import <nixpkgs> {}, compiler ? "default", doBenchmark ? false }:
 
 let
 
   inherit (nixpkgs) pkgs;
 
-  f = { mkDerivation, base, Cabal, containers, deepseq, mtl, parsec
-      , random, stdenv, syb, cabal-install
+  f = { mkDerivation, base, containers, deepseq, hashable, hspec
+      , HUnit, mtl, stdenv, text
       }:
       mkDerivation {
         pname = "tree-automata";
         version = "0.1.0.0";
         src = ./.;
         libraryHaskellDepends = [
-          base Cabal containers deepseq mtl parsec random syb cabal-install
+          base containers deepseq hashable mtl text
         ];
+        testHaskellDepends = [ base containers hspec HUnit mtl text ];
         homepage = "https://github.com/svenkeidel/tree-automata.git";
         description = "Regular tree automata";
         license = stdenv.lib.licenses.bsd3;
@@ -23,7 +24,9 @@ let
                        then pkgs.haskellPackages
                        else pkgs.haskell.packages.${compiler};
 
-  drv = haskellPackages.callPackage f {};
+  variant = if doBenchmark then pkgs.haskell.lib.doBenchmark else pkgs.lib.id;
+
+  drv = variant (haskellPackages.callPackage f {});
 
 in
 
