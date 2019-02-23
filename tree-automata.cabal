@@ -20,6 +20,7 @@ library
   exposed-modules:     TreeAutomata
   build-depends:       base >= 4.7 && < 5
                      , containers
+                     , unordered-containers
                      , mtl
                      , text
                      , deepseq
@@ -33,6 +34,7 @@ test-suite specs
   other-modules:       TreeAutomataSpec
   build-depends:       base
                      , containers
+                     , unoredered-containers
                      , hspec
                      , HUnit
                      , mtl

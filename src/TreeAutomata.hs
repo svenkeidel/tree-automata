@@ -8,17 +8,16 @@ module TreeAutomata
   ( GrammarBuilder
   , Grammar
   , Rhs (..)
-  , Nonterm
+  , NonTerm
   , Alphabet
   , Arity
 
   -- Constructions
   , singleton
-  , grammar
   , addConstructor
   , wildcard
   , union
-  , intersection
+  -- , intersection
 
   -- Transformations
   , epsilonClosure
@@ -31,7 +30,7 @@ module TreeAutomata
   , determinize
   , widen
   , widen'
-  , replaceNonterm
+  , replaceNonTerm
   , replaceEdge
   , wideningClashes
   , correspondenceSet
@@ -64,50 +63,49 @@ import           Data.List hiding (union)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Maybe
+import           Data.HashSet (HashSet)
+import qualified Data.HashSet as H
 import           Data.Set (Set)
 import qualified Data.Set as Set
-import           Data.Text (Text)
 import qualified Data.Text as Text
+    
+import           Text.Printf
 
-type Nonterm = Text
-data Rhs a = Ctor a [Nonterm] | Eps Nonterm deriving (Eq, Ord)
+import           NonTerm
+
+data Rhs a = Ctor a [NonTerm] | Eps NonTerm deriving (Eq, Ord)
 
 instance Show a => Show (Rhs a) where
-  show (Ctor c ns) = show c ++ "(" ++ Text.unpack (Text.intercalate ", " ns) ++ ")"
-  show (Eps e) = Text.unpack e
+  show (Ctor c ns) = show c ++ "(" ++ Text.unpack (Text.intercalate ", " (map toText ns)) ++ ")"
+  show (Eps e) = show e
 
 instance NFData a => NFData (Rhs a) where
   rnf (Ctor c ns) = rnf c `seq` rnf ns
   rnf (Eps n) = rnf n
 
-instance Hashable a => Hashable (Rhs a) where
-  hashWithSalt s (Ctor ctor args) = s `hashWithSalt` (0::Int) `hashWithSalt` ctor `hashWithSalt` args
-  hashWithSalt s (Eps name) = s `hashWithSalt` (1::Int) `hashWithSalt` name
-
 -- The second field of `Grammar` is strict so whnf is enough to get real benchmark numbers
-type ProdMap a = Map Nonterm [Rhs a]
-data Grammar a = Grammar Nonterm !(ProdMap a)
+type ProdMap a = Map NonTerm [Rhs a]
+data Grammar a = Grammar NonTerm !(ProdMap a)
 
 instance (Ord a, Show a) => Show (Grammar a) where
-  show (Grammar start prods) = "start: " ++ Text.unpack start ++ "\n" ++ concatMap f (Map.toAscList prods)
+  show (Grammar s p) = "start: " ++ show s ++ "\n" ++ concatMap f (Map.toAscList p)
     where
-      f :: (Ord a, Show a) => (Nonterm, [Rhs a]) -> String
-      f (lhs, rhs) = unlines (map (g lhs) $ sort rhs)
-      g :: Show a => Nonterm -> Rhs a -> String
-      g lhs rhs = Text.unpack lhs ++ " → " ++ show rhs
+      f :: (Ord a, Show a) => (NonTerm, [Rhs a]) -> String
+      f (lhs, rhs) = unlines (map (\rhs -> printf " → " (show lhs) (show rhs)) $ sort rhs)
 
 -- TODO: Naming context in grammar
 instance NFData a => NFData (Grammar a) where
   rnf (Grammar s p) = rnf s `seq` rnf p
 
-instance Hashable a => Hashable (Grammar a) where
-  hashWithSalt s (Grammar start prods) = s `hashWithSalt` (0::Int) `hashWithSalt` start `hashWithSalt` prods'
+instance (Hashable a, Eq a) => Hashable (Grammar a) where
+  hashWithSalt s (Grammar _ ps) = hashWithSalt s (alph ps)
     where
-      prods' = Map.foldrWithKey (\k v hash -> hash `hashWithSalt` k `hashWithSalt` v) (1::Int) prods
+      alph :: (Hashable a, Eq a) => ProdMap a -> HashSet a
+      alph m = H.fromList [ c | Ctor c _ <- concat $ Map.elems m]
 
 type GrammarBuilder a = State Int (Grammar a)
 
-instance Show (Grammar a) => Show (GrammarBuilder a) where
+instance (Ord a, Show a) => Show (GrammarBuilder a) where
   show g = show (evalState g 0)
 
 instance Ord a => Eq (GrammarBuilder a) where
@@ -119,7 +117,7 @@ instance Ord a => Eq (GrammarBuilder a) where
 
 deriving instance NFData a => NFData (GrammarBuilder a)
 
-instance Hashable a => Hashable (GrammarBuilder a) where
+instance (Hashable a, Eq a) => Hashable (GrammarBuilder a) where
   hashWithSalt s g = hashWithSalt s (evalState g 0)
 
 type Alphabet a = Map a [Arity]
@@ -130,13 +128,13 @@ type Arity = Int
 -- deterministic.
 singleton :: a -> GrammarBuilder a
 singleton c = do
-  start <- uniqueStart
-  grammar start (Map.singleton start [ Ctor c [] ])
+  s <- uniqueStart
+  return $ Grammar s (Map.singleton s [ Ctor c [] ])
 
 -- | Create a grammar with the given start symbol and production
 -- rules. Depending on the production map, the resulting grammar is
 -- either deterministic or nondeterministic.
-grammar :: Nonterm -> ProdMap a -> GrammarBuilder a
+grammar :: NonTerm -> ProdMap a -> GrammarBuilder a
 grammar s ps = return (Grammar s ps)
 
 -- | Given a non-terminal symbol with n arguments, combines n grammars
@@ -147,14 +145,14 @@ addConstructor :: Eq a => a -> [GrammarBuilder a] -> GrammarBuilder a
 addConstructor n gs = do
   s <- uniqueStart
   gs' <- sequence gs
-  grammar s (Map.insertWith (++) s [ Ctor n (map start gs') ] (Map.unionsWith (\r1 r2 -> nub (r1 ++ r2)) (map productions gs')))
+  return $ Grammar s (Map.insertWith (++) s [ Ctor n (map start gs') ] (Map.unionsWith (\r1 r2 -> nub (r1 ++ r2)) (map productions gs')))
 
 -- | Creates a grammar with all possible terms over a given
 -- signature. This grammar is by definition nondeterministic.
 wildcard :: Alphabet a -> GrammarBuilder a
 wildcard ctxt = do
-  start <- uniqueStart
-  grammar start (Map.fromList [(start, [Ctor c (replicate i start) | (c, is) <- Map.toList ctxt, i <- is])])
+  s <- uniqueStart
+  return $ Grammar s (Map.fromList [(s, [Ctor c (replicate i s) | (c, is) <- Map.toList ctxt, i <- is])])
 
 -- | Union of two grammars. A new, unique start symbol is
 -- automatically created.  If either of the grammars is empty, the
@@ -167,42 +165,43 @@ union g1 g2
  | otherwise = do
      Grammar start1 prods1 <- g1
      Grammar start2 prods2 <- g2
-     start <- uniqueStart
-     grammar start (Map.insert start (nub [Eps start1, Eps start2]) $ Map.unionWith (\r1 r2 -> nub (r1 ++ r2)) prods1 prods2)
+     s <- uniqueStart
+     return $ Grammar s (Map.insert s (nub [Eps start1, Eps start2]) $ Map.unionWith (error "non terminals are not disjoint") prods1 prods2)
 
 -- | Returns the intersection of the two given grammars.  The
 -- intersection is taken by taking the cross products of 1) the
 -- non-terminals, 2) the start symbols and 3) the production
 -- rules. Intuitively, this runs both grammars in
 -- parallel. Deterministic grammars are closed under intersection.
-intersection :: Eq a => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
-intersection g1 g2 = do
-  Grammar s1 p1 <- g1
-  Grammar s2 p2 <- g2
-  let
-    intersectNonterm :: Nonterm -> Nonterm -> Nonterm
-    intersectNonterm n1 n2 = Text.concat [n1, "⨯", n2]
-    prods = [(intersectNonterm n1 n2, [Ctor c1 (zipWith intersectNonterm x1 x2) | Ctor c1 x1 <- r1, Ctor c2 x2 <- r2, c1 == c2] ++
-               [Eps (intersectNonterm x n2) | Eps x <- r1] ++ [Eps (intersectNonterm n1 x) | Eps x <- r2])
-            | (n1, r1) <- Map.toList p1, (n2, r2) <- Map.toList p2]
-  normalize $ epsilonClosure $ return $ Grammar (intersectNonterm s1 s2) (Map.fromList prods)
+-- intersection :: Eq a => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
+-- intersection g1 g2 = do
+--   Grammar s1 p1 <- g1
+--   Grammar s2 p2 <- g2
+--   let
+--     intersectNonTerm :: NonTerm -> NonTerm -> NonTerm
+--     intersectNonTerm n1 n2 = Text.concat [n1, "⨯", n2]
+--     prods = [(intersectNonTerm n1 n2, [Ctor c1 (zipWith intersectNonTerm x1 x2) | Ctor c1 x1 <- r1, Ctor c2 x2 <- r2, c1 == c2] ++
+--                [Eps (intersectNonTerm x n2) | Eps x <- r1] ++ [Eps (intersectNonTerm n1 x) | Eps x <- r2])
+--             | (n1, r1) <- Map.toList p1, (n2, r2) <- Map.toList p2]
+--   normalize $ epsilonClosure $ return $ Grammar (intersectNonTerm s1 s2) (Map.fromList prods)
 
--- | Takes the epsilon closure of a grammar, preserving
--- determinicity.
+-- | Takes the epsilon closure of a grammar, preserving determinicity.
 epsilonClosure :: GrammarBuilder a -> GrammarBuilder a
 epsilonClosure g = do
   Grammar s p <- g
   let
-    close name = [r | r@(Ctor _ _) <- concatMap (fromJust . flip Map.lookup p) (reach name)]
-    reach :: Nonterm -> [Nonterm]
-    reach name = Set.toList $ execState (epsReach name) Set.empty where
-      epsReach :: Nonterm -> State (Set Nonterm) ()
-      epsReach n = do
-        r <- get
-        unless (Set.member n r) $ do
-          put (Set.insert n r)
-          sequence_ [epsReach k | Eps k <- Map.findWithDefault (error ("Nonterm " ++ show n ++ " not in the grammar")) n p]
-  grammar s (Map.mapWithKey (\k _ -> close k) p)
+    -- Computes the set of non-terminals reachable via epsilon rules.
+    epsReach :: NonTerm -> Set NonTerm
+    epsReach name = go name Set.empty
+      where
+        go :: NonTerm -> Set NonTerm -> Set NonTerm
+        go n r 
+          | Set.member n r = r
+          | otherwise      = foldl' (\r' rhs -> case rhs of Eps k -> go k r'; _ -> r') r (p Map.! n)
+
+    close name = [ r | r@(Ctor _ _) <- concatMap (p Map.!) (epsReach name) ]
+
+  return $ Grammar s (Map.mapWithKey (\k _ -> close k) p)
 
 -- | Removes productions that are not reachable form the start. This
 -- may make a nondeterministic grammar deterministic, if the removed
@@ -212,12 +211,14 @@ dropUnreachable g = do
   Grammar s p <- g
   let
     reachables = execState (f s) Set.empty
-    f :: Nonterm -> State (Set Nonterm) ()
+
+    f :: NonTerm -> State (Set NonTerm) ()
     f n = do
       r <- get
       unless (Set.member n r) $ do
         put (Set.insert n r)
-        sequence_ [mapM_ f (rhsNonterms x) | x <- fromMaybe [] (Map.lookup n p)]
+        sequence_ [mapM_ f (rhsNonTerms x) | x <- fromMaybe [] (Map.lookup n p)]
+
   grammar s (Map.filterWithKey (\k _ -> Set.member k reachables) p)
 
 -- | Removes productions for empty non-terminals
@@ -226,14 +227,14 @@ dropEmpty g = do
   -- TODO: this should be equivalent to dropUnproductive, but isn't. Why not?
   Grammar s p <- g
   let
-    filterProds = filter (all (`Set.member` nonEmpty) . rhsNonterms)
+    filterProds = filter (all (`Set.member` nonEmpty) . rhsNonTerms)
     nonEmpty = execState (mapM_ f nulls) Set.empty
-    invMap = invert (Map.map (concatMap rhsNonterms) p)
+    invMap = invert (Map.map (concatMap rhsNonTerms) p)
     nulls = Set.fromList [l | (l, r) <- Map.toList p, producesConstant r]
-    f :: Nonterm -> State (Set Nonterm) ()
+    f :: NonTerm -> State (Set NonTerm) ()
     f n = do r <- get
              unless (Set.member n r) $
-               when (any (all (`Set.member` r) . rhsNonterms) (case Map.lookup n p of Just x -> x)) $ do
+               when (any (all (`Set.member` r) . rhsNonTerms) (p Map.! n)) $ do
                  put (Set.insert n r)
                  sequence_ [f x | x <- Map.findWithDefault [] n invMap]
   grammar s (Map.map filterProds (Map.filterWithKey (\k _ -> Set.member k nonEmpty) p))
@@ -248,7 +249,7 @@ dropUnproductive g = do
   Grammar start prods <- g
   prodNs <- fmap productive g
   let filterProds :: [Rhs a] -> [Rhs a]
-      filterProds = filter (all (`Set.member` prodNs) . rhsNonterms)
+      filterProds = filter (all (`Set.member` prodNs) . rhsNonTerms)
   grammar start (Map.map filterProds (Map.filterWithKey (\k _ -> k `Set.member` prodNs) prods))
 
 -- | Removes useless productions. Unreachable productions are dropped
@@ -284,7 +285,7 @@ fromSubterms ((c,gs):xs) = foldr (\(c, gs) g -> union (addConstructor' c gs) g) 
   addConstructor' :: Eq a => a -> [GrammarBuilder a] -> GrammarBuilder a
   addConstructor' c gs = addConstructor c gs
 
-type RenameMap = Map ([Nonterm]) Nonterm
+type RenameMap = Map ([NonTerm]) NonTerm
 
 -- | Determinizes a nondeterministic grammar. If the given grammar is
 -- already deterministic, the result is still deterministic.
@@ -295,7 +296,7 @@ determinize g | isEmpty g = g
   (ps,rmap) <- go [s] p Map.empty Map.empty
   grammar (rmap Map.! [s]) ps
  where
-   go :: Ord a => [Nonterm] -> ProdMap a -> ProdMap a -> RenameMap -> State Int (ProdMap a, RenameMap)
+   go :: Ord a => [NonTerm] -> ProdMap a -> ProdMap a -> RenameMap -> State Int (ProdMap a, RenameMap)
    go ns p res rmap = case Map.lookup ns rmap of
      Just n -> return (res,rmap)
      Nothing -> do
@@ -316,14 +317,14 @@ determinize g | isEmpty g = g
                  let subterms = map (rmap' Map.!) t
                  return (Map.insertWith (\r1 r2 -> if head r1 `elem` r2 then r2 else r1 ++ r2) n [(Ctor c subterms)] ps',rmap')
              ) (res,rmap') (Map.toList prods)
-   fromCtor :: Rhs a -> (a,[[Nonterm]])
+   fromCtor :: Rhs a -> (a,[[NonTerm]])
    fromCtor (Ctor c ns) = (c,[ns])
    fromCtor _ = error "epsilon"
 
 widen :: (Show a, Ord a) => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
 widen g1 g2 = widen' g1 (union g1 g2)
 
-type WideMap a = Map Nonterm (Int,Set a,[Rhs a])
+type WideMap a = Map NonTerm (Int,Set a,[Rhs a])
 
 widen' :: (Show a, Ord a) => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
 widen' g1 g2 = do
@@ -340,21 +341,21 @@ widen' g1 g2 = do
       then g2
       else
         let ((n',a),_) = minimumBy (closestAncestor w2) (Map.toList nodes)
-        in normalize $ return $ replaceNonterm n' a g2'
+        in normalize $ return $ replaceNonTerm n' a g2'
     else
       let ((n',a),edges) = minimumBy (closestAncestor w2) (Map.toList arcs)
           (ctor,lhs,i) = Set.elemAt 0 edges
       in normalize $ return $ replaceEdge ctor lhs i a g2'
 
 -- | Heuristic: best node replacement is the one that has the closest ancestor.
-closestAncestor :: WideMap a -> ((Nonterm,Nonterm),Set (a,Nonterm,Int)) -> ((Nonterm,Nonterm),Set (a,Nonterm,Int)) -> Ordering
+closestAncestor :: WideMap a -> ((NonTerm,NonTerm),Set (a,NonTerm,Int)) -> ((NonTerm,NonTerm),Set (a,NonTerm,Int)) -> Ordering
 closestAncestor w ((n,a),_) ((m,a'),_) = toEnum (d1 - d2) where
   d1 = depth a w - depth n w
   d2 = depth a' w - depth m w
 
 -- | Replaces the given nonterminal throughout the entire grammar.
-replaceNonterm :: Nonterm -> Nonterm -> Grammar a -> Grammar a
-replaceNonterm n a (Grammar s ps) = if s == n then Grammar a ps' else Grammar s ps' where
+replaceNonTerm :: NonTerm -> NonTerm -> Grammar a -> Grammar a
+replaceNonTerm n a (Grammar s ps) = if s == n then Grammar a ps' else Grammar s ps' where
   ps' = Map.map (map (replace n a)) (Map.delete n ps)
   replace n a rhs = case rhs of
     Ctor c ts -> Ctor c (map (\m -> if m == n then a else m) ts)
@@ -364,7 +365,7 @@ replaceNonterm n a (Grammar s ps) = if s == n then Grammar a ps' else Grammar s 
 -- hand side of the given lhs.  For example, A -> foo(B,C) | bar(B,C)
 -- should become A -> foo(B',C) | bar(B,C) and A -> foo(B,B) should
 -- become A -> foo(B',B).
-replaceEdge :: (Show a, Eq a) => a -> Nonterm -> Int -> Nonterm -> Grammar a -> Grammar a
+replaceEdge :: (Show a, Eq a) => a -> NonTerm -> Int -> NonTerm -> Grammar a -> Grammar a
 replaceEdge ctor lhs i ancestor (Grammar s ps) = Grammar s ps' where
   ps' = Map.adjust (foldr (\rhs rhss -> case rhs of
                               Ctor c' args | ctor == c' -> Ctor ctor (replace args i ancestor):rhss
@@ -377,10 +378,10 @@ replace xs i x = case splitAt i xs of
   (front, element:back) -> front ++ x : back
   _ -> xs
 
-nodeReplacements :: Ord a => Grammar a -> Map (Nonterm,Nonterm) (Set (a,Nonterm,Int)) -> WideMap a -> WideMap a -> Map (Nonterm,Nonterm) (Set (a,Nonterm,Int))
+nodeReplacements :: Ord a => Grammar a -> Map (NonTerm,NonTerm) (Set (a,NonTerm,Int)) -> WideMap a -> WideMap a -> Map (NonTerm,NonTerm) (Set (a,NonTerm,Int))
 nodeReplacements = findRule nodeAncestor
 
-nodeAncestor :: Ord a => Nonterm -> Nonterm -> [Nonterm] -> WideMap a -> WideMap a -> Grammar a -> Maybe Nonterm
+nodeAncestor :: Ord a => NonTerm -> NonTerm -> [NonTerm] -> WideMap a -> WideMap a -> Grammar a -> Maybe NonTerm
 nodeAncestor _ _ [] _ _ _ = Nothing
 nodeAncestor n n' ancs w1 w2 g = let
   d2 = depth n' w2
@@ -392,10 +393,10 @@ nodeAncestor n n' ancs w1 w2 g = let
      then Just a
      else nodeAncestor n n' (delete a ancs) w1 w2 g
 
-arcReplacements :: Ord a => Grammar a -> Map (Nonterm,Nonterm) (Set (a,Nonterm,Int)) -> WideMap a -> WideMap a -> Map (Nonterm,Nonterm) (Set (a,Nonterm,Int))
+arcReplacements :: Ord a => Grammar a -> Map (NonTerm,NonTerm) (Set (a,NonTerm,Int)) -> WideMap a -> WideMap a -> Map (NonTerm,NonTerm) (Set (a,NonTerm,Int))
 arcReplacements = findRule arcAncestor
 
-arcAncestor :: Ord a => Nonterm -> Nonterm -> [Nonterm] -> WideMap a -> WideMap a -> Grammar a -> Maybe Nonterm
+arcAncestor :: Ord a => NonTerm -> NonTerm -> [NonTerm] -> WideMap a -> WideMap a -> Grammar a -> Maybe NonTerm
 arcAncestor _ _ [] _ _ _ = Nothing
 arcAncestor n n' ancs w1 w2 g = let
   d2 = depth n' w2
@@ -407,28 +408,28 @@ arcAncestor n n' ancs w1 w2 g = let
      then Just a
      else arcAncestor n n' (delete a ancs) w1 w2 g
 
-overapproximates :: Ord a => Nonterm -> Nonterm -> ProdMap a -> Bool
+overapproximates :: Ord a => NonTerm -> NonTerm -> ProdMap a -> Bool
 overapproximates n a ps = nontermGrammar `subsetOf` ancestorGrammar where
   ancestorGrammar = grammar a ps
   nontermGrammar = grammar n ps
 
-wideningClash :: Ord a => Nonterm -> WideMap a -> Nonterm -> WideMap a -> Bool
+wideningClash :: Ord a => NonTerm -> WideMap a -> NonTerm -> WideMap a -> Bool
 wideningClash n w1 n' w2 = (depth n w1 == depth n' w2 && prlb' n w1 /= prlb' n' w2) || depth n w1 < depth n' w2
 
-wideningClashes :: Ord a => Map (Nonterm,Nonterm) (Set (a,Nonterm,Int)) -> WideMap a -> WideMap a -> Map (Nonterm,Nonterm) (Set (a,Nonterm,Int))
+wideningClashes :: Ord a => Map (NonTerm,NonTerm) (Set (a,NonTerm,Int)) -> WideMap a -> WideMap a -> Map (NonTerm,NonTerm) (Set (a,NonTerm,Int))
 wideningClashes correspondence w1 w2 = Map.filterWithKey (\(n,n') _ -> wideningClash n w1 n' w2) correspondence
 
 -- | Given a set of widening topological clashes and a selection
 -- function, findRule makes a selection from the clashes. See
 -- arcReplacements and nodeReplacements.
-findRule :: Ord a => (Nonterm -> Nonterm -> [Nonterm] -> WideMap a -> WideMap a -> Grammar a -> Maybe Nonterm)
-  -> Grammar a -> Map (Nonterm,Nonterm) (Set (a,Nonterm,Int)) -> WideMap a -> WideMap a -> Map (Nonterm,Nonterm) (Set (a,Nonterm,Int))
+findRule :: Ord a => (NonTerm -> NonTerm -> [NonTerm] -> WideMap a -> WideMap a -> Grammar a -> Maybe NonTerm)
+  -> Grammar a -> Map (NonTerm,NonTerm) (Set (a,NonTerm,Int)) -> WideMap a -> WideMap a -> Map (NonTerm,NonTerm) (Set (a,NonTerm,Int))
 findRule selection g2 wideClashes w1 w2 = Map.foldrWithKey (\(n,n') edges ancestors -> case selection n n' (findAncestors n' w2 g2) w1 w2 g2 of
     Nothing -> ancestors
     Just a  -> Map.insert (n',a) edges ancestors) Map.empty wideClashes where
 
 -- | Requires an epsilon closured grammar.
-correspondenceSet :: Ord a => Nonterm -> WideMap a -> Nonterm -> WideMap a -> Map (Nonterm,Nonterm) (Set (a,Nonterm,Int))
+correspondenceSet :: Ord a => NonTerm -> WideMap a -> NonTerm -> WideMap a -> Map (NonTerm,NonTerm) (Set (a,NonTerm,Int))
 correspondenceSet s1 w1 s2 w2 = go (Map.singleton (s1,s2) Set.empty) s1 s2 where
   go correspondence n n' = if depth s1 w1 /= depth s2 w2 || prlb' s1 w1 /= prlb' s2 w2
     then correspondence
@@ -444,26 +445,26 @@ correspondenceSet s1 w1 s2 w2 = go (Map.singleton (s1,s2) Set.empty) s1 s2 where
 -- | Finds all proper ancestors of a nonterminal, i.e., all
 -- nonterminals that can (in)directly produce the given nonterminal not including
 -- that nonterminal itself.
-findAncestors :: Nonterm -> WideMap a -> Grammar a -> [Nonterm]
+findAncestors :: NonTerm -> WideMap a -> Grammar a -> [NonTerm]
 findAncestors n w g = Set.toList ancestors where
   ancestors = go n w g $ Set.filter (\p -> p /= n && n `elem` children (prods p w)) (productive g)
-  go :: Nonterm -> WideMap a -> Grammar a -> Set Nonterm -> Set Nonterm
+  go :: NonTerm -> WideMap a -> Grammar a -> Set NonTerm -> Set NonTerm
   go n w g ancs = if ancs == ancs'' then ancs else go n w g ancs'' where
     ancs' = Set.filter (\p -> not (Set.null (ancs `Set.intersection` Set.fromList (children (prods p w))))) (productive g)
     ancs'' = Set.union ancs' ancs
 
-depth :: Nonterm -> WideMap a -> Int
+depth :: NonTerm -> WideMap a -> Int
 depth n w = let (d,_,_) = w Map.! n in d
 
-prlb' :: Nonterm -> WideMap a -> Set a
+prlb' :: NonTerm -> WideMap a -> Set a
 prlb' n w = let (_,p,_) = w Map.! n in p
 
-prods :: Nonterm -> WideMap a -> [Rhs a]
+prods :: NonTerm -> WideMap a -> [Rhs a]
 prods n w = let (_,_,p) = w Map.! n in p
 
 -- | The principal label set of a given nonterminal symbol is the set
 -- of constructor names that it can generate.
-prlb :: Ord a => Nonterm -> ProdMap a -> Set a
+prlb :: Ord a => NonTerm -> ProdMap a -> Set a
 prlb n prods = Set.fromList [ c | Ctor c _ <- prods Map.! n ]
 
 -- | This function computes the information required to perform the
@@ -483,8 +484,8 @@ produces :: Ord a => GrammarBuilder a -> a -> Bool
 produces g n = any (elem n) (Set.map (\p -> [ c | Ctor c [] <- prods Map.! p]) (productive (Grammar s prods))) where
   Grammar s prods = evalState g 0
 
-data Constraint = Constraint (Nonterm, Nonterm) | Trivial Bool deriving (Show)
-type ConstraintSet = Map (Nonterm,Nonterm) [[Constraint]]
+data Constraint = Constraint (NonTerm, NonTerm) | Trivial Bool deriving (Show)
+type ConstraintSet = Map (NonTerm,NonTerm) [[Constraint]]
 
 -- | Test whether the first grammar is a subset of the second,
 -- i.e. whether L(g1) ⊆ L(g2). Both grammars need to be deterministic,
@@ -494,7 +495,7 @@ g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) wh
   Grammar s1 p1 = evalState g1 0
   Grammar s2 p2 = evalState g2 0
   -- Solves the generated set of constraints.
-  solve :: (Nonterm, Nonterm) -> ConstraintSet -> Bool
+  solve :: (NonTerm, NonTerm) -> ConstraintSet -> Bool
   solve pair constraints = case Map.lookup pair constraints of
     Just deps -> all (any (\dep -> case dep of Trivial t -> t; Constraint p -> solve p constraints)) deps
     Nothing -> True
@@ -502,7 +503,7 @@ g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) wh
   -- for two production rules S -> foo(A) | foo(B) | c and S' -> foo(A') | foo(B') | c. This constraint is stored in a
   -- ConstraintSet with key (S,S') and value [[Constraint ("A","A'"),Constraint ("A","B'")],...]. False results are
   -- skipped as an optimization.
-  generate :: ConstraintSet -> Set (Nonterm,Nonterm) -> ConstraintSet
+  generate :: ConstraintSet -> Set (NonTerm,NonTerm) -> ConstraintSet
   generate constraints toTest = if Set.null toTest
     then constraints
     else let
@@ -524,7 +525,7 @@ g1 `subsetOf` g2 = solve (s1,s2) $ generate Map.empty (Set.singleton (s1,s2)) wh
   -- Given two nonterminals, e.g. S -> foo(A) | foo(B) | c and S' -> foo(A') | foo(B') | c, this function pairs
   -- all constructors creating constraints of the form [[A⊆A' ∨ A⊆B' ∨ False],[B⊆A' ∨ B⊆B' ∨ False],[False ∨ False ∨ True].
   -- As an optimization, False results are skipped entirely, creating instead [[A⊆A' ∨ A⊆B'],[B⊆A' ∨ B⊆B'],[True]
-  shareCtor :: Nonterm -> Nonterm -> [[Constraint]]
+  shareCtor :: NonTerm -> NonTerm -> [[Constraint]]
   shareCtor a1 a2 = [ [ r | r2 <- Map.findWithDefault [] a2 p2, r <- match r1 r2 ] | r1 <- Map.findWithDefault [] a1 p1 ]
   -- Given two constructors, this function creates the actual constraints:
   -- 1. If two constants are identical, i.e. c and c from the example above, this is trivially true.
@@ -549,7 +550,7 @@ height g = Map.foldr (\rhss acc -> acc + length rhss) 0 ps where
   Grammar _ ps = evalState g 0
 
 -- | Returns the start symbol of the given grammar.
-start :: Grammar a -> Nonterm
+start :: Grammar a -> NonTerm
 start (Grammar s _) = s
 
 -- | Returns the productions of the given grammar.
@@ -588,7 +589,7 @@ isSingleton g = isProductive s (Grammar s ps) && noAlts where
 
 -- | Tests whether the given nonterminal is productive in the given
 -- grammar.
-isProductive :: Nonterm -> Grammar a -> Bool
+isProductive :: NonTerm -> Grammar a -> Bool
 isProductive n g = Set.member n (productive g)
 
 -- | Checks if the given grammar is deterministic. A deterministic
@@ -604,19 +605,25 @@ isDeterministic g = all (\rhss -> eqLength (nubBy determinicity rhss) rhss) (Map
   determinicity _ _ = False
 
 -- | Returns all productive nonterminals in the given grammar.
-productive :: Grammar a -> Set Nonterm
-productive (Grammar _ prods) = execState (go prods) p where
-  p = Set.fromList [ n | (n, rhss) <- Map.toList prods, producesConstant rhss]
-  filter :: [Rhs a] -> Set Nonterm -> Bool
-  filter rhss p = case rhss of
-    (Ctor _ args : rhss) -> if and (map (`Set.member` p) args) then True else filter rhss p
-    (Eps nonterm : rhss) -> if Set.member nonterm p then True else filter rhss p
-    [] -> False
-  go :: ProdMap a -> State (Set Nonterm) ()
-  go prods = do p <- get
-                let p' = Set.union p $ Set.fromList [ n | (n, rhss) <- Map.toList prods, filter rhss p ]
-                put p'
-                if p == p' then return () else go prods
+productive :: Grammar a -> Set NonTerm
+productive (Grammar _ prods) = execState (go prods) p
+  where
+
+    p = Set.fromList [ n | (n, rhss) <- Map.toList prods, producesConstant rhss]
+  
+    go :: ProdMap a -> State (Set NonTerm) ()
+    go prods = do
+      p <- get
+      let p' = Set.union p $ Set.fromList [ n | (n, rhss) <- Map.toList prods, filter rhss p ]
+      put p'
+      if p == p' then return () else go prods
+
+    filter :: [Rhs a] -> Set NonTerm -> Bool
+    filter rhss p = case rhss of
+      (Ctor _ args : rhss) -> if and [ arg `Set.member` p | arg <- args] then True else filter rhss p
+      (Eps nonterm : rhss) -> if Set.member nonterm p then True else filter rhss p
+      [] -> False
+
 
 -- | The size of a right hand side.
 sizeRhs :: Rhs a -> Int
@@ -624,13 +631,13 @@ sizeRhs (Ctor _ args) = length args
 sizeRhs (Eps _) = 1
 
 -- | List the names that occur in a right hand side.
-rhsNonterms :: Rhs a -> [Nonterm]
-rhsNonterms (Ctor _ ns) = ns
-rhsNonterms (Eps n) = [n]
+rhsNonTerms :: Rhs a -> [NonTerm]
+rhsNonTerms (Ctor _ ns) = ns
+rhsNonTerms (Eps n) = [n]
 
 -- | List the names that occur in all right hand sides.
-children :: [Rhs a] -> [Nonterm]
-children = nub . concat . map rhsNonterms
+children :: [Rhs a] -> [NonTerm]
+children = nub . concat . map rhsNonTerms
 
 -- | Returns a grammar where the start symbol points to the m-th
 -- subterm of the n-th production of the original start symbol.
@@ -651,22 +658,6 @@ nthSubterm n m g = do
 -- produces a constant.
 producesConstant :: [Rhs a] -> Bool
 producesConstant = isJust . find (\r -> case r of Ctor _ [] -> True; _ -> False)
-
-fresh :: State Int Int
-fresh = do
-  x <- get
-  put (x+1)
-  return x
-
-uniqueStart :: State Int Text
-uniqueStart = do
-  x <- fresh
-  return $ Text.pack ("Start" ++ show x)
-
-uniqueNt :: State Int Text
-uniqueNt = do
-  x <- fresh
-  return $ Text.pack ("Nt" ++ show x)
 
 eqLength :: [a] -> [b] -> Bool
 eqLength [] [] = True
