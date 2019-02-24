@@ -17,10 +17,11 @@ library
   hs-source-dirs:      src
   default-language:    Haskell2010
   ghc-options:         -O2
-  exposed-modules:     TreeAutomata
+  exposed-modules:     TreeAutomata,
+                       NonTerm
   build-depends:       base >= 4.7 && < 5
                      , containers
-                     , unordered-containers
+                     , unordered-containers >= 0.2.10.0
                      , mtl
                      , text
                      , deepseq

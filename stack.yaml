@@ -1,6 +1,6 @@
 flags: {}
 extra-package-dbs: []
-resolver: lts-13.8
+resolver: nightly-2019-02-23
 packages:
 - .
 extra-deps:
