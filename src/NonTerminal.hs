@@ -1,15 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
-module NonTerm(NonTerm(..)) where
+module NonTerminal(NonTerminal(..)) where
 
 import Control.Monad.State(State,get,put)
 
-class NonTerm n where
+class NonTerminal n where
   type Gen n :: *
   fresh :: State (Gen n) n
 
-instance NonTerm Int where
+instance NonTerminal Int where
   type Gen Int = Int
   fresh = do
     x <- get
