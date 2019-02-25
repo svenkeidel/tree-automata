@@ -6,6 +6,7 @@
 {-# LANGUAGE TypeFamilies #-}
 module Terminal where
 
+import           Prelude hiding (pred)
 import           Control.Monad
 
 import           Data.Text (Text)
@@ -28,7 +29,7 @@ type Identifiable a = (Hashable a, Eq a)
 class Terminal t where
   nonTerminals :: Identifiable n => t n -> HashSet n
   productive :: Identifiable n => HashSet n -> t n -> Bool
-  dropUnproductive :: Identifiable n => HashSet n -> t n -> t n
+  filter :: (n -> Bool) -> t n -> t n
   determinize :: (Identifiable n, Identifiable n', Applicative f) => (HashSet n -> f n') -> t n -> f (t n')
   subsetOf :: (Identifiable n, Identifiable n', MonadPlus f) => ([(n,n')] -> f ()) -> t n -> t n' -> f ()
   traverse :: (Identifiable n, Identifiable n', Applicative f) => (n -> f n') -> t n -> f (t n')
@@ -55,7 +56,7 @@ instance Terminal Constr where
     sub <- IM.elems ar
     concat (H.toList sub)
   productive prod (Constr m) = any (any (any (all (`H.member` prod)))) m
-  dropUnproductive prod (Constr m) = Constr (M.map (IM.map (H.filter (all (`H.member` prod)))) m)
+  filter pred (Constr m) = Constr (M.map (IM.map (H.filter (all pred))) m)
   determinize f (Constr m) = Constr <$> T.traverse (T.traverse (fmap H.singleton . T.traverse f . transpose)) m
   subsetOf leq (Constr m1) (Constr m2) = do
     guard (m1 `subsetKeys` m2)

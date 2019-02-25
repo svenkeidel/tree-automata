@@ -1,9 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedLists #-}
-{-# LANGUAGE PartialTypeSignatures #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 module TreeGrammarSpec(main, spec) where
 
--- import           Control.Monad.State hiding (sequence)
+import           Control.Monad
+import           Control.Exception (try,ErrorCall)
 
 import           TreeGrammar
 import           Terminal(Constr)
@@ -12,6 +15,9 @@ import           NonTerminal(Named)
 import           Test.Hspec
 import           Test.Hspec.QuickCheck
 import           Test.QuickCheck
+
+import           GHC.Exts
+import           Text.Printf
 
 main :: IO ()
 main = hspec spec
@@ -113,28 +119,15 @@ spec = do
   --     in g `shouldSatisfy` isSingleton
 
   describe "Union" $ do
-    -- it "should work on the union of two small grammars" $
-    --   let g1 :: GrammarBuilder Text
-    --       g1 = grammar "Foo" $ M.fromList [ ("Foo", [ Ctor "Zero" [] ])]
-    --       g2 :: GrammarBuilder Text
-    --       g2 = grammar "Bar" $ M.fromList [ ("Bar", [ Ctor "Num" [] ])]
-    --       g3 :: GrammarBuilder Text
-    --       g3 = grammar "Start0" $ M.fromList [ ("Start0", [ Eps "Foo", Eps "Bar" ])
-    --                                          , ("Foo", [ Ctor "Zero" [] ])
-    --                                          , ("Bar", [ Ctor "Num" [] ])]
-    --   in union g1 g2 `shouldBeLiteral` g3
 
-    it "should work non deterministic grammars" $
+    it "should work for non deterministic grammars" $
       union pcf nondet `shouldBe` pcf_nondet
 
-    prop "should be idempotent: G ∪ G = G" $
-      forAll (elements allGrammars) $ \g ->
-        union g g `shouldBe` g
+    prop "should be idempotent: G ∪ G = G" $ \(g :: GrammarBuilder Named Constr) ->
+      union g g `shouldBe` g
 
-    prop "should be an upper bound: G1 ⊆ G1 ∪ G2" $
-      forAll (elements allGrammars) $ \g1 ->
-        forAll (elements allGrammars) $ \g2 ->
-          union g1 g2 `shouldSatisfy` (g1 `subsetOf'`)
+    prop "should be an upper bound: G1 ⊆ G1 ∪ G2" $ \(g1 :: GrammarBuilder Named Constr) (g2 :: GrammarBuilder Named Constr) ->
+      g1 `shouldBeSubsetOf` union g1 g2
 
 
   -- describe "Intersection" $ do
@@ -175,54 +168,33 @@ spec = do
                            , ("B", [("b",[]), ("b'",[])])
                            ]
                            []
-      g `shouldSatisfy` (`subsetOf'` g')
-      g' `shouldNotSatisfy` (`subsetOf'` g)
+      g `shouldBeSubsetOf` g'
+      g' `shouldNotBeSubsetOf` g
 
     it "should work for recursive grammars" $ do
-      pcf_sub `shouldSatisfy` (`subsetOf'` pcf)
-      pcf `shouldNotSatisfy` (`subsetOf'` pcf_sub)
+      pcf_sub `shouldBeSubsetOf` pcf
+      pcf `shouldNotBeSubsetOf` pcf_sub
 
-  --   it "reflexivity should hold on the nondeterministic grammar" $
-  --     determinize nondet `shouldSatisfy` subsetOf (determinize nondet)
+    prop "should be reflexive" $ \(g :: GrammarBuilder Named Constr) ->
+      g `shouldBeSubsetOf` g
 
-  --   it "should not hold for languages that do not intersect" $ do
-  --     determinize nondet `shouldNotSatisfy` subsetOf pcf
-  --     pcf `shouldNotSatisfy` subsetOf (determinize nondet)
+  describe "Grammar Optimizations" $ do
+    describe "Epsilon Closure" $ do
+      prop "should describe the same language: epsilonClosure g = g" $
+        \(g :: GrammarBuilder Named Constr) -> epsilonClosure g `shouldBe` g
 
-  describe "Equality" $ do
-    it "should be reflexive" $ forAll (elements allGrammars) $ \g ->
-      g `shouldBe` g
+    describe "drop unreachable prductions" $ do
+      prop "should describe the same language: dropUnreachable g = g" $
+        \(g :: GrammarBuilder Named Constr) -> dropUnreachable g `shouldBe` g
 
-  --   it "should be true when comparing the same grammar (nondet)" $ do
-  --     nondet `shouldBe` nondet
-
-  --   it "should be false when comparing different grammars" $ do
-  --     pcf `shouldNotBe` nondet
-
-  --   it "should be true when comparing different grammars producing the same language" $ do
-  --     nondet `shouldBe` nondet'
-
-  -- describe "Integration tests" $ do
-  --   it "union idempotence should hold for the nondeterministic grammar" $
-  --     union nondet nondet `shouldBe` nondet
-
-  --   it "union idempotence should hold for PCF" $
-  --     union pcf pcf `shouldBe` pcf
-
-  --   it "intersection of a subset should be that subset" $
-  --     intersection pcf pcf_sub `shouldBe` pcf_sub
-
-  --   it "union absorption should hold" $
-  --     union pcf (intersection pcf nondet) `shouldBe` pcf
-
-  --   it "intersection idempotence should hold for PCF" $
-  --     intersection pcf pcf `shouldBe` pcf
-
-  --   it "intersection idempotence should hold for the nondeterministic grammar" $
-  --     intersection nondet nondet `shouldBe` nondet
-
-  --   it "intersection absorption should hold" $
-  --     intersection pcf (union pcf nondet) `shouldBe` pcf
+    describe "drop unproductive prductions" $ do
+      prop "should describe the same language: dropUnproductive g = g" $
+        \(g :: GrammarBuilder Named Constr) -> do
+           m <- try (dropUnreachable (dropUnproductive g) `shouldBe` g)
+           case m of
+             Left (_ :: ErrorCall) -> 
+               expectationFailure (printf "g = %s\ndropUnproductive g = %s" (show g) (show (dropUnproductive (dropUnproductive g))))
+             Right _ -> return ()
 
   -- describe "Alphabet" $ do
   --   it "should correctly list the alphabet of PCF" $
@@ -473,10 +445,6 @@ spec = do
   --     arith1 `shouldSatisfy` subsetOf w_arith
 
   where
-    allGrammars :: [GrammarBuilder Named Constr]    
-    allGrammars = [nondet,pcf,pcf_sub,pcf_nondet]
-
-
     nondet :: GrammarBuilder Named Constr
     nondet = grammar "S" [ ("A", [ ("a",[]) ])
                          , ("G", [ ("g",[ "G" ])
@@ -580,20 +548,45 @@ spec = do
     --                                     , ("T6", [ Ctor "one" [], Ctor "Mul" ["T6","T7"] ])
     --                                     , ("T7", [ Ctor "var" [], Ctor "par" ["Tn"], Ctor "cst" [] ])]
 
-    -- Because equality is implemented using inclusion, we cannot test
-    -- these functions by using `shouldBe`, which uses the Eq type
-    -- class, which uses our equality. This dependency chain results
-    -- in unreliable outcomes in the unit tests. We break this by
-    -- directly comparing the in-memory representation of the
-    -- grammars, which we can do because we know exactly what these
-    -- should look like. In fact, this is an even stricter test than
-    -- simply comparing grammars using `==`, because we now also
-    -- detect spurious non-terminal symbols and production rules.
-    -- shouldBeLiteral :: (Ord n, Show n) => GrammarBuilder n t -> GrammarBuilder n t -> Expectation
-    -- actual `shouldBeLiteral` expected =
-    --   unless (start actual' == start expected' && productions' actual' == productions' expected')
-    --     (assertFailure $ "Grammars are not literally equal.\nExpected:\n\n" ++ show expected ++ "\nbut got:\n\n" ++ show actual)
-    --   where
-    --     expected' = getGrammar expected
-    --     actual' = getGrammar actual
-    --     productions' g = M.map sort (productions g)
+    shouldBeSubsetOf :: (Show n, Show (t n), IsGrammar n t) => GrammarBuilder n t -> GrammarBuilder n t -> Expectation
+    shouldBeSubsetOf b1 b2 = unless (b1 `subsetOf'` b2) $
+      expectationFailure (printf "Grammar %s is not subset of %s" (show b1) (show b2))
+
+    shouldNotBeSubsetOf :: (Show n, Show (t n), IsGrammar n t) => GrammarBuilder n t -> GrammarBuilder n t -> Expectation
+    shouldNotBeSubsetOf b1 b2 = when (b1 `subsetOf'` b2) $
+      expectationFailure (printf "Grammar %s is subset of %s" (show b1) (show b2))
+                        
+
+type NonTerminals = [String]
+type Alphabet = [(String,Int)]
+
+instance Arbitrary (GrammarBuilder Named Constr) where
+  arbitrary = arbitraryGrammar
+              ["A","B","C","D","E","F"]
+              [("a",0),("b",0),("c",0),("f",1),("g",2),("h",0),("h",1),("h",2)]
+
+arbitraryGrammar :: NonTerminals -> Alphabet -> Gen (GrammarBuilder Named Constr)
+arbitraryGrammar ns alph = do
+  grammar <$> elements ns <*> genCons <*> genEps
+  where
+
+    genCons :: Gen [(String,Constr String)]
+    genCons = forM ns $ \n -> do
+      constrs <- listRange 1 3 (elements alph)
+      cs <- forM constrs $ \(con,arity) -> do
+        ts <- vectorOf arity (elements ns)
+        return (con,ts)
+      return (n,fromList cs)
+
+    genEps :: Gen [(String,[String])]
+    genEps = do
+      dom <- listRange 0 2 (elements ns)
+      forM dom $ \x -> do
+        cod <- listRange 1 2 (elements ns)
+        return (x,cod)
+
+
+    listRange :: Int -> Int -> Gen a -> Gen [a]
+    listRange n m xs = do
+      i <- choose (n,m)
+      vectorOf i xs

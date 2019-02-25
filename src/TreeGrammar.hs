@@ -9,6 +9,7 @@
 module TreeGrammar
 ( Grammar
 , GrammarBuilder
+, IsGrammar
 , grammar
 -- , addConstructor
 , union
@@ -138,7 +139,7 @@ epsilonReachable ns (Grammar _ p) = foldl' go Set.empty ns
       | otherwise      = foldl' go (Set.insert n r) (eps (p Map.! n))
 
 -- | Removes productions that are not reachable from the start symbol.
-dropUnreachable :: (Foldable t, IsGrammar n t) => GrammarBuilder n t -> GrammarBuilder n t
+dropUnreachable :: (IsGrammar n t) => GrammarBuilder n t -> GrammarBuilder n t
 dropUnreachable = mapGrammar $ \g ->
   let reach = reachable' (start g) g
   in g { prods = Map.filterWithKey (\k _ -> Set.member k reach) (prods g) }
@@ -155,7 +156,13 @@ reachable' n = reachable ([n] :: [n])
 
 dropUnproductive :: IsGrammar n t => GrammarBuilder n t -> GrammarBuilder n t
 dropUnproductive = mapGrammar $ \g ->
-  g { prods = Map.filterWithKey (\k _ -> Set.member k (productive g)) (prods g) }
+  g { prods = Map.mapMaybeWithKey
+                  (\k r -> if Set.member k (productive g)
+                            then Just (r { cons = T.filter (`Set.member` (productive g)) (cons r)
+                                         , eps  = Set.intersection (eps r) (productive g) })
+                            else Nothing)
+                  (prods g)
+    }
 
 -- | Returns all productive nonterminals in the given grammar.
 productive :: forall n t. IsGrammar n t => Grammar n t -> HashSet n
