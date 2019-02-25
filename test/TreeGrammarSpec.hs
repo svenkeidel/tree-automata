@@ -1,24 +1,23 @@
 {-# LANGUAGE OverloadedStrings #-}
-module TreeAutomataSpec(main, spec) where
+{-# LANGUAGE OverloadedLists #-}
+{-# LANGUAGE PartialTypeSignatures #-}
+module TreeGrammarSpec(main, spec) where
 
 -- import           Control.Monad.State hiding (sequence)
 
--- import           Data.List hiding (union)
--- import qualified Data.Map as M
--- import qualified Data.Set as S
--- import           Data.Text (Text)
-
--- import           TreeAutomata
+import           TreeGrammar
+import           Terminal(Constr)
+import           NonTerminal(Named)
 
 import           Test.Hspec
--- import           Test.HUnit
+import           Test.Hspec.QuickCheck
+import           Test.QuickCheck
 
 main :: IO ()
 main = hspec spec
 
 spec :: Spec
 spec = do
-  return ()
 
   -- describe "Subterms" $ do
   --   it "should destruct and rebuild PCF" $ do
@@ -56,8 +55,7 @@ spec = do
 
   -- describe "Productivity" $ do
   --   it "should give all nonterminals for PCF" $ do
-  --     let pcf' = evalState pcf 0
-  --     map (`isProductive` pcf') ["Exp", "Type", "String", "PStart"] `shouldBe` [True, True, True, True]
+  --     (`productive` pcf) ["Exp", "Type", "String", "PStart"] `shouldBe` [True, True, True, True]
 
   --   it "should give no nonterminals for infinite" $ do
   --     let infinite' = evalState infinite 0
@@ -114,26 +112,30 @@ spec = do
   --                                       , ("Baz", [ Ctor "Baz" [] ]) ])
   --     in g `shouldSatisfy` isSingleton
 
-  -- describe "Union" $ do
-  --   it "should work on the union of two small grammars" $
-  --     let g1 :: GrammarBuilder Text
-  --         g1 = grammar "Foo" $ M.fromList [ ("Foo", [ Ctor "Zero" [] ])]
-  --         g2 :: GrammarBuilder Text
-  --         g2 = grammar "Bar" $ M.fromList [ ("Bar", [ Ctor "Num" [] ])]
-  --         g3 :: GrammarBuilder Text
-  --         g3 = grammar "Start0" $ M.fromList [ ("Start0", [ Eps "Foo", Eps "Bar" ])
-  --                                            , ("Foo", [ Ctor "Zero" [] ])
-  --                                            , ("Bar", [ Ctor "Num" [] ])]
-  --     in union g1 g2 `shouldBeLiteral` g3
+  describe "Union" $ do
+    -- it "should work on the union of two small grammars" $
+    --   let g1 :: GrammarBuilder Text
+    --       g1 = grammar "Foo" $ M.fromList [ ("Foo", [ Ctor "Zero" [] ])]
+    --       g2 :: GrammarBuilder Text
+    --       g2 = grammar "Bar" $ M.fromList [ ("Bar", [ Ctor "Num" [] ])]
+    --       g3 :: GrammarBuilder Text
+    --       g3 = grammar "Start0" $ M.fromList [ ("Start0", [ Eps "Foo", Eps "Bar" ])
+    --                                          , ("Foo", [ Ctor "Zero" [] ])
+    --                                          , ("Bar", [ Ctor "Num" [] ])]
+    --   in union g1 g2 `shouldBeLiteral` g3
 
-  --   it "should work on the union of the nondeterministic and PCF grammars" $
-  --     union pcf nondet `shouldBeLiteral` pcf_nondet
+    it "should work non deterministic grammars" $
+      union pcf nondet `shouldBe` pcf_nondet
 
-  --   it "should produce the same language when taken over identical grammars (PCF)" $ do
-  --     union pcf pcf `shouldBe` pcf
+    prop "should be idempotent: G ∪ G = G" $
+      forAll (elements allGrammars) $ \g ->
+        union g g `shouldBe` g
 
-  --   it "should produce the same language when taken over identical grammars (nondet)" $ do
-  --     union nondet nondet `shouldBe` nondet
+    prop "should be an upper bound: G1 ⊆ G1 ∪ G2" $
+      forAll (elements allGrammars) $ \g1 ->
+        forAll (elements allGrammars) $ \g2 ->
+          union g1 g2 `shouldSatisfy` (g1 `subsetOf'`)
+
 
   -- describe "Intersection" $ do
   --   it "of a subset of the PCF grammar should be that subset" $
@@ -156,30 +158,29 @@ spec = do
   --     intersection nondet infinite `shouldBeLiteral` (grammar "S⨯EStart" M.empty)
   --     intersection infinite nondet `shouldBeLiteral` (grammar "EStart⨯S" M.empty)
 
-  -- describe "Inclusion" $ do
-  --   it "should work for the worked out (deterministic) example" $
-  --     let g :: GrammarBuilder Text
-  --         g = grammar "S" $ M.fromList [("S", [ Ctor "f" ["A"]
-  --                                             , Ctor "c" []
-  --                                             , Ctor "f" ["B"]])
-  --                                      ,("A", [ Ctor "g" ["S"]
-  --                                             , Ctor "e" []])
-  --                                      ,("B", [ Ctor "b" []])]
-  --         g' :: GrammarBuilder Text
-  --         g' = grammar "S'" $ M.fromList [("S'", [ Ctor "f" ["A'"]
-  --                                                , Ctor "c" []
-  --                                                , Ctor "f" ["B'"]])
-  --                                        ,("A'", [ Ctor "g" ["S'"]
-  --                                                , Ctor "e" []])
-  --                                        ,("B'", [ Ctor "b" []])]
-  --     in g `shouldSatisfy` subsetOf g'
+  describe "Inclusion" $ do
+    it "should work for non-deterministic grammars" $ do
+      let g :: GrammarBuilder Named Constr
+          g = grammar "S" [ ("S", [ ("f",["A", "B"])
+                                  , ("f",["A'", "B'"])])
+                          , ("A", [ ("a",[]) ])
+                          , ("B", [ ("b",[]) ])
+                          , ("A'", [ ("a'",[]) ])
+                          , ("B'", [ ("b'",[]) ])
+                          ]
+                          []
+          g' :: GrammarBuilder Named Constr
+          g' = grammar "S" [ ("S", [("f",["A", "B"])])
+                           , ("A", [("a",[]), ("a'",[])])
+                           , ("B", [("b",[]), ("b'",[])])
+                           ]
+                           []
+      g `shouldSatisfy` (`subsetOf'` g')
+      g' `shouldNotSatisfy` (`subsetOf'` g)
 
-  --   it "should be true for the PCF grammar and a subset of the PCF grammar" $ do
-  --     pcf_sub `shouldSatisfy` (`subsetOf` pcf)
-  --     pcf `shouldNotSatisfy` (`subsetOf` pcf_sub)
-
-  --   it "reflexivity should hold on PCF" $
-  --     pcf `shouldSatisfy` subsetOf pcf
+    it "should work for recursive grammars" $ do
+      pcf_sub `shouldSatisfy` (`subsetOf'` pcf)
+      pcf `shouldNotSatisfy` (`subsetOf'` pcf_sub)
 
   --   it "reflexivity should hold on the nondeterministic grammar" $
   --     determinize nondet `shouldSatisfy` subsetOf (determinize nondet)
@@ -188,9 +189,9 @@ spec = do
   --     determinize nondet `shouldNotSatisfy` subsetOf pcf
   --     pcf `shouldNotSatisfy` subsetOf (determinize nondet)
 
-  -- describe "Equality" $ do
-  --   it "should be true when comparing the same grammar" $ do
-  --     pcf `shouldBe` pcf
+  describe "Equality" $ do
+    it "should be reflexive" $ forAll (elements allGrammars) $ \g ->
+      g `shouldBe` g
 
   --   it "should be true when comparing the same grammar (nondet)" $ do
   --     nondet `shouldBe` nondet
@@ -435,7 +436,7 @@ spec = do
   --                                                                                              ,("par","T7",0)])]
 
   --   it "should replace nonterminals with ancestors" $ do
-  --     let consr :: GrammarBuilder Text
+  --     let consr :: GrammarBuilder Int Constr
   --         consr = grammar "T3" $ M.fromList [ ("T3", [ Ctor "nil" [], Ctor "cons" ["T4","T3"] ])
   --                                           , ("T4", [ Ctor "any" [] ])
   --                                           , ("T6", [ Ctor "any" [] ])
@@ -444,7 +445,7 @@ spec = do
   --     return (replaceNonterm "T5" "T3" cons1') `shouldBeLiteral` consr
 
   --   it "should replace an edge" $ do
-  --     let consr :: GrammarBuilder Text
+  --     let consr :: GrammarBuilder Int Constr
   --         consr = grammar "T3" $ M.fromList [ ("T3", [ Ctor "nil" [], Ctor "cons" ["T4","T3"] ])
   --                                           , ("T4", [ Ctor "any" [] ])
   --                                           , ("T5", [ Ctor "nil" [], Ctor "cons" ["T6","T7"] ])
@@ -471,120 +472,128 @@ spec = do
   --     arith0 `shouldSatisfy` subsetOf w_arith
   --     arith1 `shouldSatisfy` subsetOf w_arith
 
-  -- where
-  --   nondet = grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
-  --                                     , ("A", [ Ctor "a" [] ])
-  --                                     , ("G", [ Ctor "g" [ "G" ]
-  --                                             , Ctor "g" [ "A" ]])
-  --                                     , ("F", [ Ctor "f" [ "G", "G" ]])]
-  --   nondet' = grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
-  --                                      , ("A", [ Ctor "a" [] ])
-  --                                      , ("G", [ Ctor "g" [ "G" ]
-  --                                              , Ctor "g" [ "A" ]])
-  --                                      , ("H", [ Eps "G" ])
-  --                                      , ("F", [ Ctor "f" [ "G", "H" ]])]
-  --   infinite = grammar "EStart" $ M.fromList [ ("EStart", [ Ctor "Bar" ["EStart"]])]
-  --   pcf = grammar "PStart" $ M.fromList [ ("PStart", [ Eps "Exp"
-  --                                                    , Eps "Type" ])
-  --                                       , ("Exp", [ Ctor "App" ["Exp", "Exp"]
-  --                                                 , Ctor "Abs" ["String", "Type", "Exp"]
-  --                                                 , Ctor "Zero" []
-  --                                                 , Ctor "Succ" ["Exp"]
-  --                                                 , Ctor "Pred" ["Exp"]
-  --                                                 , Ctor "Ifz" ["Exp", "Exp", "Exp"]])
-  --                                       , ("Type", [ Ctor "Num" []
-  --                                                  , Ctor "Fun" ["Type", "Type"]])
-  --                                       , ("String", [ Ctor "String" [] ])]
-  --   pcf_sub = grammar "PSStart" $ M.fromList [ ("PSStart", [ Eps "Exp"
-  --                                                          , Eps "Type" ])
-  --                                            , ("Exp", [ Ctor "Succ" [ "Exp" ]
-  --                                                      , Ctor "Pred" [ "Exp" ]
-  --                                                      , Ctor "Zero" []])
-  --                                            , ("Type", [ Ctor "Num" []
-  --                                                       , Ctor "Fun" ["Type", "Type"]])]
-  --   pcf_nondet = grammar "Start0" $ M.fromList [ ("Start0", [ Eps "PStart"
-  --                                                           , Eps "S" ])
-  --                                              , ("PStart", [ Eps "Exp"
-  --                                                           , Eps "Type" ])
-  --                                              , ("S", [ Eps "F" ])
-  --                                              , ("A", [ Ctor "a" [] ])
-  --                                              , ("G", [ Ctor "g" [ "G" ]
-  --                                                      , Ctor "g" [ "A" ]])
-  --                                              , ("F", [ Ctor "f" [ "G", "G" ]])
-  --                                              , ("Exp", [ Ctor "App" ["Exp","Exp"]
-  --                                                        , Ctor "Abs" ["String", "Type", "Exp"]
-  --                                                        , Ctor "Zero" []
-  --                                                        , Ctor "Succ" ["Exp"]
-  --                                                        , Ctor "Pred" ["Exp"]
-  --                                                        , Ctor "Ifz" ["Exp", "Exp", "Exp"]])
-  --                                              , ("Type", [ Ctor "Num" []
-  --                                                         , Ctor "Fun" ["Type","Type"]])
-  --                                              , ("String", [ Ctor "String" [] ])]
+  where
+    allGrammars :: [GrammarBuilder Named Constr]    
+    allGrammars = [nondet,pcf,pcf_sub,pcf_nondet]
 
-  --   cons0 :: GrammarBuilder Text
-  --   cons0 = grammar "T0" $ M.fromList [ ("T0", [ Ctor "nil" [], Ctor "cons" ["T1","T2"] ])
-  --                                     , ("T1", [ Ctor "any" [] ])
-  --                                     , ("T2", [ Ctor "nil" [] ])]
-  --   cons1 :: GrammarBuilder Text
-  --   cons1 = grammar "T3" $ M.fromList [ ("T3", [ Ctor "nil" [], Ctor "cons" ["T4","T5"] ])
-  --                                     , ("T4", [ Ctor "any" [] ])
-  --                                     , ("T5", [ Ctor "nil" [], Ctor "cons" ["T6","T7"] ])
-  --                                     , ("T6", [ Ctor "any" [] ])
-  --                                     , ("T7", [ Ctor "nil" [] ])]
-  --   cons2 :: GrammarBuilder Text
-  --   cons2 = grammar "T8" $ M.fromList [ ("T8", [ Ctor "nil" [], Ctor "cons" ["T9","T10"] ])
-  --                                     , ("T9", [ Ctor "any" [] ])
-  --                                     , ("T10", [ Ctor "nil" [], Ctor "cons" ["T11","T12"] ])
-  --                                     , ("T11", [ Ctor "any" [] ])
-  --                                     , ("T12", [ Ctor "nil" [], Ctor "cons" ["T13","T14"] ])
-  --                                     , ("T13", [ Ctor "any" [] ])
-  --                                     , ("T14", [ Ctor "nil" [] ])]
-  --   cons01 :: GrammarBuilder Text
-  --   cons01 = grammar "T3" $ M.fromList [ ("T3", [ Ctor "nil" [], Ctor "cons" ["T4", "T3"] ])
-  --                                      , ("T4", [ Ctor "any" [] ])]
-  --   cons12 :: GrammarBuilder Text
-  --   cons12 = grammar "T8" $ M.fromList [ ("T8", [ Ctor "nil" [], Ctor "cons" ["T9", "T10"] ])
-  --                                      , ("T9", [ Ctor "any" [] ])
-  --                                      , ("T10", [ Ctor "nil" [], Ctor "cons" ["T11", "T10"] ])
-  --                                      , ("T11", [ Ctor "any" [] ])]
 
-  --   arith0 :: GrammarBuilder Text
-  --   arith0 = grammar "T0" $ M.fromList [ ("T0", [ Ctor "zero" [], Ctor "Add" ["Tx", "T1"] ])
-  --                                      , ("Tx", [ Ctor "zero" [] ])
-  --                                      , ("T1", [ Ctor "one" [], Ctor "Mul" ["T1","T2"] ])
-  --                                      , ("T2", [ Ctor "cst" [], Ctor "par" ["Tx"], Ctor "var" [] ])]
-  --   arith1 :: GrammarBuilder Text
-  --   arith1 = grammar "Tn" $ M.fromList [ ("Tn", [ Ctor "zero" [], Ctor "Add" ["T3","T6"] ])
-  --                                      , ("T3", [ Ctor "zero" [], Ctor "Add" ["Tx","T4"] ])
-  --                                      , ("Tx", [ Ctor "Zero" [] ])
-  --                                      , ("T4", [ Ctor "one" [], Ctor "Mul" ["T4","T5"] ])
-  --                                      , ("T5", [ Ctor "cst" [], Ctor "par" ["Tx"], Ctor "var" [] ])
-  --                                      , ("T6", [ Ctor "one" [], Ctor "Mul" ["T6","T7"] ])
-  --                                      , ("T7", [ Ctor "cst" [], Ctor "par" ["T3"], Ctor "var" [] ])]
-  --   arith2 :: GrammarBuilder Text
-  --   arith2 = grammar "T0" $ M.fromList [ ("T0", [ Ctor "cst" [], Ctor "var" [] ]) ]
-  --   arith3 :: GrammarBuilder Text
-  --   arith3 = grammar "Tn" $ M.fromList [ ("Tn", [ Ctor "cst" [], Ctor "par" ["Tx"], Ctor "var" [] ])
-  --                                      , ("Tx", [ Ctor "zero" [] ]) ]
-  --   arith01 :: GrammarBuilder Text
-  --   arith01 = grammar "Tn" $ M.fromList [ ("Tn", [ Ctor "zero" [], Ctor "Add" ["Tn","T6"] ])
-  --                                       , ("T6", [ Ctor "one" [], Ctor "Mul" ["T6","T7"] ])
-  --                                       , ("T7", [ Ctor "var" [], Ctor "par" ["Tn"], Ctor "cst" [] ])]
+    nondet :: GrammarBuilder Named Constr
+    nondet = grammar "S" [ ("A", [ ("a",[]) ])
+                         , ("G", [ ("g",[ "G" ])
+                                 , ("g",[ "A" ])])
+                         , ("F", [ ("f",[ "G", "G" ]) ])
+                         ]
+                         [ ("S", [ "F" ])]
+    -- nondet' = grammar "S" $ [ ("S", [ Eps "F" ])
+    --                         , ("A", [ Ctor "a" [] ])
+    --                         , ("G", [ Ctor "g" [ "G" ]
+    --                                 , Ctor "g" [ "A" ]])
+    --                         , ("H", [ Eps "G" ])
+    --                         , ("F", [ Ctor "f" [ "G", "H" ]])]
+    -- infinite = grammar "EStart" $ [ ("EStart", [ Ctor "Bar" ["EStart"]])]
+    pcf :: GrammarBuilder Named Constr
+    pcf = grammar "PStart" [ ("Exp", [ ("App",["Exp", "Exp"])
+                                     , ("Abs",["String", "Type", "Exp"])
+                                     , ("Zero",[])
+                                     , ("Succ",["Exp"])
+                                     , ("Pred",["Exp"])
+                                     , ("Ifz",["Exp", "Exp", "Exp"])
+                                     ])
+                           , ("Type", [ ("Num",[])
+                                      , ("Fun",["Type", "Type"])
+                                      ])
+                           , ("String", [ ("String",[]) ])
+                           ]
 
-  --   -- Because equality is implemented using inclusion, we cannot test
-  --   -- these functions by using `shouldBe`, which uses the Eq type
-  --   -- class, which uses our equality. This dependency chain results
-  --   -- in unreliable outcomes in the unit tests. We break this by
-  --   -- directly comparing the in-memory representation of the
-  --   -- grammars, which we can do because we know exactly what these
-  --   -- should look like. In fact, this is an even stricter test than
-  --   -- simply comparing grammars using `==`, because we now also
-  --   -- detect spurious non-terminal symbols and production rules.
-  --   shouldBeLiteral :: (Ord a, Show a) => GrammarBuilder a -> GrammarBuilder a -> Expectation
-  --   actual `shouldBeLiteral` expected =
-  --     unless (start actual' == start expected' && productions' actual' == productions' expected')
-  --       (assertFailure $ "Grammars are not literally equal.\nExpected:\n\n" ++ show expected ++ "\nbut got:\n\n" ++ show actual)
-  --     where
-  --       expected' = evalState expected 0
-  --       actual' = evalState actual 0
-  --       productions' g = M.map sort (productions g)
+                           [ ("PStart", [ "Exp" , "Type" ]) ]
+    pcf_sub :: GrammarBuilder Named Constr
+    pcf_sub = grammar "PSStart" [ ("Exp", [ ("Succ",[ "Exp" ])
+                                          , ("Pred",[ "Exp" ])
+                                          , ("Zero",[])])
+                                , ("Type", [ ("Num",[])
+                                           , ("Fun",["Type", "Type"])])]
+                                [ ("PSStart", [ "Exp" , "Type" ]) ]
+    pcf_nondet :: GrammarBuilder Named Constr
+    pcf_nondet = grammar "Start" [ ("A", [ ("a",[]) ])
+                                 , ("G", [ ("g",[ "G" ])
+                                         , ("g",[ "A" ])])
+                                 , ("F", [ ("f",[ "G", "G" ])])
+                                 , ("Exp", [ ("App",["Exp","Exp"])
+                                           , ("Abs",["String", "Type", "Exp"])
+                                           , ("Zero",[])
+                                           , ("Succ",["Exp"])
+                                           , ("Pred",["Exp"])
+                                           , ("Ifz",["Exp", "Exp", "Exp"])])
+                                 , ("Type", [ ("Num",[])
+                                            , ("Fun",["Type","Type"])])
+                                 , ("String", [ ("String",[]) ])]
+
+                                 [ ("Start", [ "Exp" , "Type", "F" ]) ] 
+
+    -- cons0 :: GrammarBuilder Named Constr
+    -- cons0 = grammar "T0" $ M.fromList [ ("T0", [ Ctor "nil" [], Ctor "cons" ["T1","T2"] ])
+    --                                   , ("T1", [ Ctor "any" [] ])
+    --                                   , ("T2", [ Ctor "nil" [] ])]
+    -- cons1 :: GrammarBuilder Named Constr
+    -- cons1 = grammar "T3" $ M.fromList [ ("T3", [ Ctor "nil" [], Ctor "cons" ["T4","T5"] ])
+    --                                   , ("T4", [ Ctor "any" [] ])
+    --                                   , ("T5", [ Ctor "nil" [], Ctor "cons" ["T6","T7"] ])
+    --                                   , ("T6", [ Ctor "any" [] ])
+    --                                   , ("T7", [ Ctor "nil" [] ])]
+    -- cons2 :: GrammarBuilder Named Constr
+    -- cons2 = grammar "T8" $ M.fromList [ ("T8", [ Ctor "nil" [], Ctor "cons" ["T9","T10"] ])
+    --                                   , ("T9", [ Ctor "any" [] ])
+    --                                   , ("T10", [ Ctor "nil" [], Ctor "cons" ["T11","T12"] ])
+    --                                   , ("T11", [ Ctor "any" [] ])
+    --                                   , ("T12", [ Ctor "nil" [], Ctor "cons" ["T13","T14"] ])
+    --                                   , ("T13", [ Ctor "any" [] ])
+    --                                   , ("T14", [ Ctor "nil" [] ])]
+    -- cons01 :: GrammarBuilder Named Constr
+    -- cons01 = grammar "T3" $ M.fromList [ ("T3", [ Ctor "nil" [], Ctor "cons" ["T4", "T3"] ])
+    --                                    , ("T4", [ Ctor "any" [] ])]
+    -- cons12 :: GrammarBuilder Named Constr
+    -- cons12 = grammar "T8" $ M.fromList [ ("T8", [ Ctor "nil" [], Ctor "cons" ["T9", "T10"] ])
+    --                                    , ("T9", [ Ctor "any" [] ])
+    --                                    , ("T10", [ Ctor "nil" [], Ctor "cons" ["T11", "T10"] ])
+    --                                    , ("T11", [ Ctor "any" [] ])]
+
+    -- arith0 :: GrammarBuilder Named Constr
+    -- arith0 = grammar "T0" $ M.fromList [ ("T0", [ Ctor "zero" [], Ctor "Add" ["Tx", "T1"] ])
+    --                                    , ("Tx", [ Ctor "zero" [] ])
+    --                                    , ("T1", [ Ctor "one" [], Ctor "Mul" ["T1","T2"] ])
+    --                                    , ("T2", [ Ctor "cst" [], Ctor "par" ["Tx"], Ctor "var" [] ])]
+    -- arith1 :: GrammarBuilder Named Constr
+    -- arith1 = grammar "Tn" $ M.fromList [ ("Tn", [ Ctor "zero" [], Ctor "Add" ["T3","T6"] ])
+    --                                    , ("T3", [ Ctor "zero" [], Ctor "Add" ["Tx","T4"] ])
+    --                                    , ("Tx", [ Ctor "Zero" [] ])
+    --                                    , ("T4", [ Ctor "one" [], Ctor "Mul" ["T4","T5"] ])
+    --                                    , ("T5", [ Ctor "cst" [], Ctor "par" ["Tx"], Ctor "var" [] ])
+    --                                    , ("T6", [ Ctor "one" [], Ctor "Mul" ["T6","T7"] ])
+    --                                    , ("T7", [ Ctor "cst" [], Ctor "par" ["T3"], Ctor "var" [] ])]
+    -- arith2 :: GrammarBuilder Named Constr
+    -- arith2 = grammar "T0" $ M.fromList [ ("T0", [ Ctor "cst" [], Ctor "var" [] ]) ]
+    -- arith3 :: GrammarBuilder Named Constr
+    -- arith3 = grammar "Tn" $ M.fromList [ ("Tn", [ Ctor "cst" [], Ctor "par" ["Tx"], Ctor "var" [] ])
+    --                                    , ("Tx", [ Ctor "zero" [] ]) ]
+    -- arith01 :: GrammarBuilder Named Constr
+    -- arith01 = grammar "Tn" $ M.fromList [ ("Tn", [ Ctor "zero" [], Ctor "Add" ["Tn","T6"] ])
+    --                                     , ("T6", [ Ctor "one" [], Ctor "Mul" ["T6","T7"] ])
+    --                                     , ("T7", [ Ctor "var" [], Ctor "par" ["Tn"], Ctor "cst" [] ])]
+
+    -- Because equality is implemented using inclusion, we cannot test
+    -- these functions by using `shouldBe`, which uses the Eq type
+    -- class, which uses our equality. This dependency chain results
+    -- in unreliable outcomes in the unit tests. We break this by
+    -- directly comparing the in-memory representation of the
+    -- grammars, which we can do because we know exactly what these
+    -- should look like. In fact, this is an even stricter test than
+    -- simply comparing grammars using `==`, because we now also
+    -- detect spurious non-terminal symbols and production rules.
+    -- shouldBeLiteral :: (Ord n, Show n) => GrammarBuilder n t -> GrammarBuilder n t -> Expectation
+    -- actual `shouldBeLiteral` expected =
+    --   unless (start actual' == start expected' && productions' actual' == productions' expected')
+    --     (assertFailure $ "Grammars are not literally equal.\nExpected:\n\n" ++ show expected ++ "\nbut got:\n\n" ++ show actual)
+    --   where
+    --     expected' = getGrammar expected
+    --     actual' = getGrammar actual
+    --     productions' g = M.map sort (productions g)
