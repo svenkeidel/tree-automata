@@ -266,8 +266,7 @@ module TreeAutomata where
 -- -- constructor and [G] is a list of grammars, with each grammar G in
 -- -- this tuple having as constructor a nonterminal from c as start symbol.
 -- -- For example, for the start production S -> foo(A,B) | bar(C) this returns
--- -- [(foo,[grammar with A as start symbol, grammar with B as start symbol])
--- -- ,(bar,[grammar with C as start symbol])]
+-- -- [(foo,[G(A), G(B)]) ,(bar,[G(C)])]
 -- toSubterms :: Ord a => GrammarBuilder a -> [(a,[GrammarBuilder a])]
 -- toSubterms g =
 --   let g' = epsilonClosure g

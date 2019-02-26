@@ -6,7 +6,9 @@
 module TreeGrammarSpec(main, spec) where
 
 import           Control.Monad
-import           Control.Exception (try,ErrorCall)
+
+import           Data.Hashable
+import           Data.Text(Text)
 
 import           TreeGrammar
 import           Terminal(Constr)
@@ -25,21 +27,106 @@ main = hspec spec
 spec :: Spec
 spec = do
 
-  -- describe "Subterms" $ do
-  --   it "should destruct and rebuild PCF" $ do
-  --     let pcf' = fromSubterms (toSubterms pcf)
-  --     pcf' `shouldSatisfy` isDeterministic
-  --     pcf' `shouldBe` pcf
+  describe "Inclusion" $ do
+    it "should work for non-deterministic grammars" $ do
+      let g :: GrammarBuilder Named Constr
+          g = grammar "S" [ ("S", [ ("f",["A", "B"])
+                                  , ("f",["A'", "B'"])])
+                          , ("A", [ ("a",[]) ])
+                          , ("B", [ ("b",[]) ])
+                          , ("A'", [ ("a'",[]) ])
+                          , ("B'", [ ("b'",[]) ])
+                          ]
+                          []
+          g' :: GrammarBuilder Named Constr
+          g' = grammar "S" [ ("S", [("f",["A", "B"])])
+                           , ("A", [("a",[]), ("a'",[])])
+                           , ("B", [("b",[]), ("b'",[])])
+                           ]
+                           []
+      g `shouldBeSubsetOf` g'
+      g' `shouldNotBeSubsetOf` g
 
-  --   it "should destruct and rebuild a nondeterministic grammar" $ do
-  --     let nondet'' = fromSubterms (toSubterms nondet)
-  --     nondet'' `shouldSatisfy` isDeterministic
-  --     nondet'' `shouldBe` nondet
+    it "should work for recursive grammars" $ do
+      pcf_sub `shouldBeSubsetOf` pcf
+      pcf `shouldNotBeSubsetOf` pcf_sub
 
-  --   it "should destruct and rebuild the infinite grammar into the empty grammar" $ do
-  --     fromSubterms (toSubterms infinite) `shouldSatisfy` isEmpty
+    prop "should be reflexive" $ \(g :: GrammarBuilder Named Constr) ->
+      g `shouldBeSubsetOf` g
 
-  -- describe "Size" $ do
+  describe "Union" $ do
+
+    it "should work for non deterministic grammars" $
+      union pcf nondet `shouldBe` pcf_nondet
+
+    prop "should be idempotent: G ∪ G = G" $ \(g :: GrammarBuilder Named Constr) ->
+      union g g `shouldBe` g
+
+    prop "should be an upper bound: G1 ⊆ G1 ∪ G2" $ \(g1 :: GrammarBuilder Named Constr) (g2 :: GrammarBuilder Named Constr) ->
+      g1 `shouldBeSubsetOf` union g1 g2
+
+
+  -- describe "Intersection" $ do
+  --   it "of a subset of the PCF grammar should be that subset" $
+  --     intersection pcf pcf_sub `shouldBeLiteral` (grammar "PStart⨯PSStart" $
+  --                                                 M.fromList [ ("Exp⨯Exp", [ Ctor "Zero" []
+  --                                                                          , Ctor "Succ" ["Exp⨯Exp"]
+  --                                                                          , Ctor "Pred" ["Exp⨯Exp"]])
+  --                                                            , ("PStart⨯PSStart", [ Ctor "Zero" []
+  --                                                                                 , Ctor "Succ" ["Exp⨯Exp"]
+  --                                                                                 , Ctor "Pred" ["Exp⨯Exp"]
+  --                                                                                 , Ctor "Num" []
+  --                                                                                 , Ctor "Fun" [ "Type⨯Type", "Type⨯Type" ]])
+  --                                                            , ("Type⨯Type", [ Ctor "Num" []
+  --                                                                            , Ctor "Fun" [ "Type⨯Type", "Type⨯Type" ]])])
+
+  --   it "should give an empty grammar if the arguments have no intersection" $ do
+  --     intersection nondet pcf `shouldBeLiteral` (grammar "S⨯PStart" M.empty)
+
+  --   it "should give an empty grammar when one of the arguments is an empty grammar" $ do
+  --     intersection nondet infinite `shouldBeLiteral` (grammar "S⨯EStart" M.empty)
+  --     intersection infinite nondet `shouldBeLiteral` (grammar "EStart⨯S" M.empty)
+
+  describe "Grammar Optimizations" $ do
+    describe "Epsilon Closure" $ do
+      prop "describes the same language: epsilonClosure g = g" $
+        \(g :: GrammarBuilder Named Constr) -> epsilonClosure g `shouldBe` g
+
+    describe "Dropping unreachable prductions" $ do
+      prop "describes the same language: dropUnreachable g = g" $
+        \(g :: GrammarBuilder Named Constr) -> dropUnreachable g `shouldBe` g
+
+    describe "Dropping unproductive prductions" $ do
+      prop "removes infinite terms from the language: dropUnproductive g ⊆ g" $
+        \(g :: GrammarBuilder Named Constr) -> do
+           dropUnproductive g `shouldBeSubsetOf` g
+
+    describe "Determinization" $ do
+      prop "removes relations between subterms: g ⊆ determinize g" $ do
+        \(g :: GrammarBuilder Named Constr) -> do
+           g `shouldBeSubsetOf` determinize g
+
+      prop "is idempotent: determinize g = determinize (determinize g)" $ do
+        \(g :: GrammarBuilder Named Constr) ->
+           let g' = determinize g :: GrammarBuilder Named Constr
+           in g' `shouldBe` determinize g'
+
+  describe "Hashing" $
+    prop "unequal hashes imply inequality" $
+      \(g1 :: GrammarBuilder Named Constr) ->
+      \(g2 :: GrammarBuilder Named Constr) ->
+      hash g1 /= hash g2 ==> g1 `shouldNotBe` g2
+
+  describe "Subterms" $ do
+    prop "toSubterms and fromSubterms are inverse" $
+      \(g :: GrammarBuilder Named Constr) ->
+         fromSubterms (toSubterms g) `shouldBe` g
+
+    prop "fromSubterms and toSubterms are inverse" $
+      \(g :: Constr (GrammarBuilder Named Constr)) ->
+         toSubterms (fromSubterms g) `shouldBe` g
+
+           -- describe "Size" $ do
   --   it "should be 25 on PCF" $
   --     size pcf `shouldBe` 25
 
@@ -117,146 +204,6 @@ spec = do
   --         g = grammar "Foo" (M.fromList [ ("Foo", [ Ctor "Bar" [ "Baz" ] ])
   --                                       , ("Baz", [ Ctor "Baz" [] ]) ])
   --     in g `shouldSatisfy` isSingleton
-
-  describe "Union" $ do
-
-    it "should work for non deterministic grammars" $
-      union pcf nondet `shouldBe` pcf_nondet
-
-    prop "should be idempotent: G ∪ G = G" $ \(g :: GrammarBuilder Named Constr) ->
-      union g g `shouldBe` g
-
-    prop "should be an upper bound: G1 ⊆ G1 ∪ G2" $ \(g1 :: GrammarBuilder Named Constr) (g2 :: GrammarBuilder Named Constr) ->
-      g1 `shouldBeSubsetOf` union g1 g2
-
-
-  -- describe "Intersection" $ do
-  --   it "of a subset of the PCF grammar should be that subset" $
-  --     intersection pcf pcf_sub `shouldBeLiteral` (grammar "PStart⨯PSStart" $
-  --                                                 M.fromList [ ("Exp⨯Exp", [ Ctor "Zero" []
-  --                                                                          , Ctor "Succ" ["Exp⨯Exp"]
-  --                                                                          , Ctor "Pred" ["Exp⨯Exp"]])
-  --                                                            , ("PStart⨯PSStart", [ Ctor "Zero" []
-  --                                                                                 , Ctor "Succ" ["Exp⨯Exp"]
-  --                                                                                 , Ctor "Pred" ["Exp⨯Exp"]
-  --                                                                                 , Ctor "Num" []
-  --                                                                                 , Ctor "Fun" [ "Type⨯Type", "Type⨯Type" ]])
-  --                                                            , ("Type⨯Type", [ Ctor "Num" []
-  --                                                                            , Ctor "Fun" [ "Type⨯Type", "Type⨯Type" ]])])
-
-  --   it "should give an empty grammar if the arguments have no intersection" $ do
-  --     intersection nondet pcf `shouldBeLiteral` (grammar "S⨯PStart" M.empty)
-
-  --   it "should give an empty grammar when one of the arguments is an empty grammar" $ do
-  --     intersection nondet infinite `shouldBeLiteral` (grammar "S⨯EStart" M.empty)
-  --     intersection infinite nondet `shouldBeLiteral` (grammar "EStart⨯S" M.empty)
-
-  describe "Inclusion" $ do
-    it "should work for non-deterministic grammars" $ do
-      let g :: GrammarBuilder Named Constr
-          g = grammar "S" [ ("S", [ ("f",["A", "B"])
-                                  , ("f",["A'", "B'"])])
-                          , ("A", [ ("a",[]) ])
-                          , ("B", [ ("b",[]) ])
-                          , ("A'", [ ("a'",[]) ])
-                          , ("B'", [ ("b'",[]) ])
-                          ]
-                          []
-          g' :: GrammarBuilder Named Constr
-          g' = grammar "S" [ ("S", [("f",["A", "B"])])
-                           , ("A", [("a",[]), ("a'",[])])
-                           , ("B", [("b",[]), ("b'",[])])
-                           ]
-                           []
-      g `shouldBeSubsetOf` g'
-      g' `shouldNotBeSubsetOf` g
-
-    it "should work for recursive grammars" $ do
-      pcf_sub `shouldBeSubsetOf` pcf
-      pcf `shouldNotBeSubsetOf` pcf_sub
-
-    prop "should be reflexive" $ \(g :: GrammarBuilder Named Constr) ->
-      g `shouldBeSubsetOf` g
-
-  describe "Grammar Optimizations" $ do
-    describe "Epsilon Closure" $ do
-      prop "should describe the same language: epsilonClosure g = g" $
-        \(g :: GrammarBuilder Named Constr) -> epsilonClosure g `shouldBe` g
-
-    describe "drop unreachable prductions" $ do
-      prop "should describe the same language: dropUnreachable g = g" $
-        \(g :: GrammarBuilder Named Constr) -> dropUnreachable g `shouldBe` g
-
-    describe "drop unproductive prductions" $ do
-      prop "should describe the same language: dropUnproductive g = g" $
-        \(g :: GrammarBuilder Named Constr) -> do
-           m <- try (dropUnreachable (dropUnproductive g) `shouldBe` g)
-           case m of
-             Left (_ :: ErrorCall) -> 
-               expectationFailure (printf "g = %s\ndropUnproductive g = %s" (show g) (show (dropUnproductive (dropUnproductive g))))
-             Right _ -> return ()
-
-  -- describe "Alphabet" $ do
-  --   it "should correctly list the alphabet of PCF" $
-  --     let a = M.fromList [("App", [2]), ("Abs", [3]), ("Zero", [0]), ("Succ", [1]), ("Pred", [1]), ("Ifz", [3]), ("Num", [0]), ("Fun", [2]), ("String", [0])]
-  --     in alphabet pcf `shouldBe` a
-
-  -- describe "Normalization" $ do
-  --   it "should work on an empty grammar" $ do
-  --     let empty :: GrammarBuilder Text
-  --         empty = grammar "S" $ M.fromList [ ("S", []) ]
-  --     dropUnreachable empty `shouldBeLiteral` empty
-  --     dropEmpty empty `shouldBeLiteral` grammar "S" M.empty
-  --     normalize empty `shouldBeLiteral` grammar "S" M.empty
-
-  -- describe "Determinization" $ do
-  --   it "should work on an empty grammar" $ do
-  --     let empty :: GrammarBuilder Text
-  --         empty = grammar "S" $ M.fromList [ ("S", []) ]
-  --     empty `shouldSatisfy` isDeterministic
-  --     determinize empty `shouldBe` empty
-
-  --   it "should correctly determinize PCF" $ do
-  --     let det = determinize pcf
-  --     det `shouldSatisfy` isDeterministic
-  --     det `shouldBe` pcf
-  --     determinize det `shouldBe` pcf
-
-  --   it "should correctly determinize the nondeterministic grammar" $ do
-  --     let det = determinize nondet
-  --     nondet `shouldNotSatisfy` isDeterministic
-  --     nondet' `shouldNotSatisfy` isDeterministic
-  --     det `shouldSatisfy` isDeterministic
-  --     det `shouldBe` nondet
-
-  --   it "should correctly determinize another nondeterministic grammar" $ do
-  --     let ng :: GrammarBuilder Text
-  --         ng = grammar "S" $ M.fromList [ ("S", [ Ctor "foo" [], Ctor "foo" [] ]) ]
-  --         det = determinize ng
-  --     ng `shouldNotSatisfy` isDeterministic
-  --     det `shouldSatisfy` isDeterministic
-  --     det `shouldBe` ng
-
-  --   it "should correctly determinize another nondeterministic grammar" $ do
-  --     let ng :: GrammarBuilder Text
-  --         ng = grammar "S" $ M.fromList [ ("S", [ Ctor "foo" [ "A", "B" ] ])
-  --                                       , ("A", [ Ctor "bar" [ "C" ]
-  --                                               , Ctor "bar" [ "D" ]])
-  --                                       , ("B", [ Ctor "baz" [ "E" ]
-  --                                               , Ctor "baz" [ "F" ]])
-  --                                       , ("C", [ Ctor "c" [] ])
-  --                                       , ("D", [ Ctor "d" [] ])
-  --                                       , ("E", [ Ctor "e" [] ])
-  --                                       , ("F", [ Ctor "f" [] ])]
-  --         det = determinize ng
-  --     ng `shouldNotSatisfy` isDeterministic
-  --     det `shouldSatisfy` isDeterministic
-  --     det `shouldBe` ng
-
-  --   it "should correctly determinize the infinite grammar" $ do
-  --     let det = determinize infinite
-  --     det `shouldSatisfy` isDeterministic
-  --     det `shouldBe` infinite
 
   -- describe "Widening" $ do
   --   it "wideMap should compute the depths and principal label sets of nonterminals in PCF" $ do
@@ -549,16 +496,16 @@ spec = do
     --                                     , ("T7", [ Ctor "var" [], Ctor "par" ["Tn"], Ctor "cst" [] ])]
 
     shouldBeSubsetOf :: (Show n, Show (t n), IsGrammar n t) => GrammarBuilder n t -> GrammarBuilder n t -> Expectation
-    shouldBeSubsetOf b1 b2 = unless (b1 `subsetOf'` b2) $
+    shouldBeSubsetOf b1 b2 = unless (b1 `subsetOf` b2) $
       expectationFailure (printf "Grammar %s is not subset of %s" (show b1) (show b2))
 
     shouldNotBeSubsetOf :: (Show n, Show (t n), IsGrammar n t) => GrammarBuilder n t -> GrammarBuilder n t -> Expectation
-    shouldNotBeSubsetOf b1 b2 = when (b1 `subsetOf'` b2) $
+    shouldNotBeSubsetOf b1 b2 = when (b1 `subsetOf` b2) $
       expectationFailure (printf "Grammar %s is subset of %s" (show b1) (show b2))
                         
 
 type NonTerminals = [String]
-type Alphabet = [(String,Int)]
+type Alphabet = [(Text,Int)]
 
 instance Arbitrary (GrammarBuilder Named Constr) where
   arbitrary = arbitraryGrammar
@@ -572,11 +519,8 @@ arbitraryGrammar ns alph = do
 
     genCons :: Gen [(String,Constr String)]
     genCons = forM ns $ \n -> do
-      constrs <- listRange 1 3 (elements alph)
-      cs <- forM constrs $ \(con,arity) -> do
-        ts <- vectorOf arity (elements ns)
-        return (con,ts)
-      return (n,fromList cs)
+      cs <- arbitraryConstr alph 1 3 (elements ns)
+      return (n,cs)
 
     genEps :: Gen [(String,[String])]
     genEps = do
@@ -585,8 +529,21 @@ arbitraryGrammar ns alph = do
         cod <- listRange 1 2 (elements ns)
         return (x,cod)
 
+instance (Eq a, Hashable a, Arbitrary a) => Arbitrary (Constr a) where
+  arbitrary = arbitraryConstr
+              [("a",0),("b",0),("c",0),("f",1),("g",2),("h",0),("h",1),("h",2)]
+              1 3
+              arbitrary
 
-    listRange :: Int -> Int -> Gen a -> Gen [a]
-    listRange n m xs = do
-      i <- choose (n,m)
-      vectorOf i xs
+arbitraryConstr :: (Eq n, Hashable n) => Alphabet -> Int -> Int -> Gen n -> Gen (Constr n)
+arbitraryConstr alph n m ns = do
+  constrs <- listRange n m (elements alph)
+  cs <- forM constrs $ \(con,arity) -> do
+    ts <- vectorOf arity ns
+    return (con,ts)
+  return (fromList cs)
+
+listRange :: Int -> Int -> Gen a -> Gen [a]
+listRange n m xs = do
+  i <- choose (n,m)
+  vectorOf i xs

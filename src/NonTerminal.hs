@@ -33,7 +33,7 @@ instance Eq Named where
 instance Hashable Named where
   hashWithSalt s (Named _ n) = hashWithSalt s n
 instance Show Named where
-  show (Named (Just n) m) = printf "%s@%s" (unpack n) (show m)
+  show (Named (Just n) _) = printf "%s" (unpack n)
   show (Named Nothing m) = show m
 
 instance NonTerminal Named where

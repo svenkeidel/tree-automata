@@ -6,11 +6,10 @@
 {-# LANGUAGE TypeFamilies #-}
 module Terminal where
 
-import           Prelude hiding (pred)
+import           Prelude hiding (pred,traverse)
 import           Control.Monad
 
 import           Data.Text (Text)
-import qualified Data.Text as Text
 import           Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import           Data.HashMap.Lazy (HashMap)
@@ -18,8 +17,10 @@ import qualified Data.HashMap.Lazy as M
 import           Data.HashSet (HashSet)
 import qualified Data.HashSet as H
 import           Data.Hashable (Hashable)
+import qualified Data.Hashable as Hash
 import qualified Data.Traversable as T
 import qualified Data.List as L
+import           Data.Functor.Identity
 
 import           GHC.Exts (IsList(..))
 import           Text.Printf
@@ -32,14 +33,18 @@ class Terminal t where
   filter :: (n -> Bool) -> t n -> t n
   determinize :: (Identifiable n, Identifiable n', Applicative f) => (HashSet n -> f n') -> t n -> f (t n')
   subsetOf :: (Identifiable n, Identifiable n', MonadPlus f) => ([(n,n')] -> f ()) -> t n -> t n' -> f ()
-  traverse :: (Identifiable n, Identifiable n', Applicative f) => (n -> f n') -> t n -> f (t n')
+  traverse :: (Identifiable n', Applicative f) => (n -> f n') -> t n -> f (t n')
+  hashWithSalt :: (Identifiable n, Monad f) => (Int -> n -> f Int) -> Int -> t n -> f Int
 
-newtype Constr n = Constr (HashMap Text (IntMap (HashSet [n])))
+map :: (Identifiable n, Identifiable n', Terminal t) => (n -> n') -> t n -> t n'
+map f t = runIdentity (traverse (Identity . f) t)
+
+newtype Constr n = Constr (HashMap Text (IntMap (HashSet [n]))) deriving (Eq)
 
 instance Identifiable n => IsList (Constr n) where
-  type Item (Constr n) = (String,[n])
-  fromList l = Constr $ M.fromListWith (IM.unionWith H.union) [ (Text.pack c, IM.singleton (length ts) (H.singleton ts)) | (c,ts) <- l]
-  toList (Constr n) = [ (Text.unpack c,t) | (c,tss) <- M.toList n, ts <- IM.elems tss, t <- H.toList ts ]
+  type Item (Constr n) = (Text,[n])
+  fromList l = Constr $ M.fromListWith (IM.unionWith H.union) [ (c, IM.singleton (length ts) (H.singleton ts)) | (c,ts) <- l]
+  toList (Constr n) = [ (c,t) | (c,tss) <- M.toList n, ts <- IM.elems tss, t <- H.toList ts ]
 
 instance Identifiable n => Semigroup (Constr n) where
   Constr m1 <> Constr m2 = Constr (M.unionWith (IM.unionWith (<>)) m1 m2)
@@ -66,6 +71,7 @@ instance Terminal Constr where
         forM_ l1 $ \as ->
           msum [ leq (zip as bs) | bs <- H.toList l2 ]
   traverse f (Constr m) = Constr <$> T.traverse (T.traverse (traverseHashSet (T.traverse f))) m
+  hashWithSalt f s m = foldM (\s' (c,ts) -> foldM f (s' `Hash.hashWithSalt` c) ts) s (toList m)
 
 traverseHashSet :: (Applicative f, Identifiable b) => (a -> f b) -> HashSet a -> f (HashSet b)
 traverseHashSet f h = H.fromList <$> T.traverse f (H.toList h)

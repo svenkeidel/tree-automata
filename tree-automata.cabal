@@ -37,6 +37,7 @@ test-suite specs
   build-depends:       base
                      , containers
                      , unordered-containers
+                     , hashable
                      , hspec
                      , QuickCheck
                      , mtl

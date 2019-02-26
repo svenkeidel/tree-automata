@@ -8,10 +8,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 module TreeGrammar
 ( Grammar
-, GrammarBuilder
 , IsGrammar
-, grammar
--- , addConstructor
 , union
 , epsilonClosure
 , dropUnreachable
@@ -20,6 +17,13 @@ module TreeGrammar
 , determinize
 , subsetOf
 , subsetOf'
+, toSubterms
+, fromSubterms
+
+, GrammarBuilder
+, fromGrammar
+, getGrammar
+, grammar
 )
 where
 
@@ -27,6 +31,7 @@ import           Prelude hiding (lookup)
 
 import           Control.Arrow
 import           Control.Monad.State
+import           Control.Monad.Writer
 
 import           Data.Maybe
 import           Data.Hashable
@@ -53,8 +58,7 @@ type IsGrammar n t = (Terminal t, Monoid (t n), NonTerminal n, Identifiable n)
 
 data GrammarBuilder n t = GrammarBuilder (State (Gen n) (Grammar n t)) (Grammar n t)
 instance IsGrammar n t => Eq (GrammarBuilder n t) where
-  b1 == b2 = isJust (subsetOf b1 b2)
-          && isJust (subsetOf b2 b1)
+  b1 == b2 = subsetOf b1 b2 && subsetOf b2 b1
 
 grammarBuilder :: NonTerminal n => State (Gen n) (Grammar n t) -> GrammarBuilder n t
 grammarBuilder f = GrammarBuilder f (generate f)
@@ -65,27 +69,39 @@ runGrammarBuilder (GrammarBuilder f _) = f
 getGrammar :: GrammarBuilder n t -> Grammar n t
 getGrammar (GrammarBuilder _ g) = g
 
-grammar :: IsGrammar n t => String -> [(String,t String)] -> [(String,[String])] -> GrammarBuilder n t
-grammar s prods eps = grammarBuilder $ do
+fromGrammar :: (Identifiable n, IsGrammar n' t) => Grammar n t -> GrammarBuilder n' t
+fromGrammar g = grammarBuilder $ do
   i <- get
-  let ((s'',p'',e''),(i',_)) = runState (do
-        s' <- go s
-        prods' <- traverse (\(n,t) -> do n' <- go n; t' <- T.traverse go t; return (n',Rhs t' mempty)) prods
-        eps' <- traverse (\(from,to) -> do from' <- go from; to' <- traverse go to; return (from',Rhs mempty (Set.fromList to'))) eps
-        return (s',prods',eps'))
+  let ((s'',p'),(i',_)) = runState (do
+        s' <- go (start g)
+        prods' <- traverse (\(n,r) -> do
+                      n' <- go n
+                      c' <- T.traverse go (cons r)
+                      e' <- traverse go (Set.toList (eps r))
+                      return (n',Rhs c' (Set.fromList e')))
+                    (Map.toList (prods g))
+        return (s',Map.fromList prods'))
         (i,mempty)
   put i'
-  return $ Grammar s'' (Map.fromList p'' <> Map.fromList e'')
+  return $ Grammar s'' p'
   where
-    go :: NonTerminal n => String -> State (Gen n, HashMap String n) n
+    go :: (Identifiable n, NonTerminal n') => n -> State (Gen n', HashMap n n') n'
     go n = do
       (_,rmap) <- get
       case Map.lookup n rmap of
         Just x -> return x
         Nothing -> do
-          n' <- fresh' (Just n)
+          n' <- fresh' Nothing
           modify $ second $ Map.insert n n'
           return n'
+
+grammar :: (IsGrammar n t, Monoid (t String))
+        => String -> [(String,t String)] -> [(String,[String])] -> GrammarBuilder n t
+grammar s prods eps = fromGrammar
+                    $ Grammar s
+                    $ Map.fromListWith (<>)
+                    $ [ (n,Rhs c mempty) | (n,c) <- prods ]
+                   ++ [ (n,Rhs mempty (Set.fromList es)) | (n,es) <- eps]
 
 mapGrammar :: (Grammar n t -> Grammar n t') -> GrammarBuilder n t -> GrammarBuilder n t'
 mapGrammar f (GrammarBuilder m g) = GrammarBuilder (fmap f m) (f g)
@@ -107,7 +123,8 @@ mapGrammar f (GrammarBuilder m g) = GrammarBuilder (fmap f m) (f g)
 --   return $ Grammar s $ Map.insert s (cons n (start <$> gs'))
 --                      $ foldMap productions gs'
 
-union :: (Show n, NonTerminal n, IsGrammar n t) => GrammarBuilder n t -> GrammarBuilder n t -> GrammarBuilder n t
+union :: (Show n, NonTerminal n, IsGrammar n t)
+      => GrammarBuilder n t -> GrammarBuilder n t -> GrammarBuilder n t
 union b1 b2 = grammarBuilder $ do
   g1 <- runGrammarBuilder b1
   g2 <- runGrammarBuilder b2
@@ -125,7 +142,7 @@ epsilonClosure = mapGrammar $ \g -> g { prods = Map.mapWithKey (close g) (prods 
           }
 
 lookup :: (Foldable f, IsGrammar n t) => f n -> Grammar n t -> t n
-lookup n g@(Grammar _ p) = cons $ foldMap (p Map.!) $ epsilonReachable n g
+lookup n g@(Grammar _ p) = cons $ foldMap (\k -> fold (Map.lookup k p)) $ epsilonReachable n g
 
 lookup' :: forall n t. IsGrammar n t => n -> Grammar n t -> t n
 lookup' n = lookup ([n] :: [n])
@@ -136,7 +153,7 @@ epsilonReachable ns (Grammar _ p) = foldl' go Set.empty ns
   where
     go r n
       | Set.member n r = r
-      | otherwise      = foldl' go (Set.insert n r) (eps (p Map.! n))
+      | otherwise      = foldl' go (Set.insert n r) (eps (fold (Map.lookup n p)))
 
 -- | Removes productions that are not reachable from the start symbol.
 dropUnreachable :: (IsGrammar n t) => GrammarBuilder n t -> GrammarBuilder n t
@@ -147,9 +164,8 @@ dropUnreachable = mapGrammar $ \g ->
 reachable :: (Foldable f, IsGrammar n t) => f n -> Grammar n t -> HashSet n
 reachable ns g = foldl' go Set.empty ns
   where
-    go r n
-      | Set.member n r = r
-      | otherwise      = foldl' go (Set.insert n r) (T.nonTerminals (lookup' n g))
+    go r n = let rhs = fold (Map.lookup n (prods g))
+             in foldl' go (Set.insert n r) ((T.nonTerminals (cons rhs) <> eps rhs) `Set.difference` r)
 
 reachable' :: forall t n. IsGrammar n t => n -> Grammar n t -> HashSet n
 reachable' n = reachable ([n] :: [n])
@@ -219,9 +235,9 @@ determinize b = grammarBuilder $ state $ \i ->
 -- case L(G1) ⊈ L(G2) or a wittness L(G1) ⊆ L(G2).  For example, if
 -- @([A,B],X) in subsetOf G1 G2@ then @L(G1(A)) U L(G1(B)) ⊆
 -- L(G2(X))@.
-subsetOf :: forall n1 n2 t. (IsGrammar n1 t, IsGrammar n2 t)
+subsetOf' :: forall n1 n2 t. (IsGrammar n1 t, IsGrammar n2 t)
          => GrammarBuilder n1 t -> GrammarBuilder n2 t -> Maybe [(HashSet n1,n2)]
-b1 `subsetOf` b2 =
+b1 `subsetOf'` b2 =
   let g1 = getGrammar b1
       g2 = getGrammar b2
   in fmap (fmap (\(x,y) -> (y,x)) . Map.toList) (execStateT (go g1 g2 [(start g1,start g2)]) mempty)
@@ -234,9 +250,40 @@ b1 `subsetOf` b2 =
         put $ Map.insert m2 (Set.insert m1 xs) seen
         T.subsetOf (go g1 g2) (lookup' m1 g1) (lookup' m2 g2)
 
-subsetOf' :: (IsGrammar n1 t, IsGrammar n2 t)
-         => GrammarBuilder n1 t -> GrammarBuilder n2 t -> Bool
-subsetOf' m1 m2 = isJust $ subsetOf m1 m2
+subsetOf :: (IsGrammar n1 t, IsGrammar n2 t)
+        => GrammarBuilder n1 t -> GrammarBuilder n2 t -> Bool
+subsetOf m1 m2 = isJust $ subsetOf' m1 m2
+
+toSubterms :: (IsGrammar n t, Monoid (t Int)) => GrammarBuilder n t -> t (GrammarBuilder n t)
+toSubterms b =
+  let g = getGrammar b
+  in T.map (\n -> fromGrammar (g {start = n}))
+           (lookup' (start g) g)
+
+fromSubterms :: IsGrammar n t => t (GrammarBuilder n t) -> GrammarBuilder n t
+fromSubterms t = grammarBuilder $ do
+  s <- fresh Nothing
+  (t',p) <- runWriterT $ T.traverse (\b -> do
+              g <- lift (runGrammarBuilder b)
+              tell (prods g)
+              return (start g)
+            ) t
+  return $ Grammar s $ Map.insert s (Rhs t' mempty) p
+
+
+instance forall n t. (IsGrammar n t, Monoid (t Int)) => Hashable (GrammarBuilder n t) where
+  hashWithSalt s0 b =
+    let g = getGrammar (determinize b :: GrammarBuilder Int t)
+    in evalState (go g s0 (start g)) mempty
+    where
+      go :: forall n' t'. IsGrammar n' t' => Grammar n' t' -> Int -> n' -> State (HashSet n') Int
+      go g s n = do
+        seen <- get
+        if Set.member n seen
+        then return $ hashWithSalt s n -- Probably wrong. Needs to be 0
+        else do
+          put $ Set.insert n seen
+          T.hashWithSalt (go g) s (lookup' n g)
 
 instance (Identifiable n, Semigroup (t n)) => Semigroup (Rhs n t) where
   Rhs c1 e1 <> Rhs c2 e2 = Rhs (c1 <> c2) (e1 <> e2)
